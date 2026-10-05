@@ -1,0 +1,327 @@
+/* ==========================================================================
+   +CULTURA • Design System Editorial (Revista Cultural Digital)
+   Paleta: Azul Profundo (#173B57), Creme (#F7F1E5), Laranja (#F28C28)
+   ========================================================================== */
+
+:root {
+  /* Cores Principais da Identidade Cultural */
+  --bg-page: #F7F1E5;            /* Creme suave / off-white principal */
+  --bg-page-subtle: #FAF6EE;     /* Creme mais claro */
+  --bg-card: #FFFFFF;            /* Branco puro para os cards */
+  --bg-card-warm: #F2EADA;       /* Destaque suave de card */
+  --bg-input: #FFFFFF;           /* Fundo de campos */
+
+  /* Azul Profundo & Variações */
+  --primary-navy: #173B57;       /* Azul Profundo principal */
+  --primary-navy-dark: #0E273C;  /* Azul meia-noite */
+  --primary-navy-soft: #234D70;  /* Azul suave para hover */
+  --primary-navy-light: #EBF2F7; /* Fundo azul clarinho */
+
+  /* Laranja / Dourado de Destaque */
+  --accent-orange: #F28C28;      /* Laranja de ação / destaque */
+  --accent-orange-hover: #E07A1A;
+  --accent-orange-light: #FDF3E7;/* Fundo suave de laranja */
+  --accent-gold: #F59E0B;        /* Estrelas de avaliação */
+
+  /* Verde Suave */
+  --accent-green: #3E8E75;       /* Verde suave / sábio para concluídos */
+  --accent-green-light: #EBF5F1;
+  --accent-rose: #D9534F;        /* Vermelho suave para remoção/alerta */
+
+  /* Tipografia & Contrastes */
+  --font-serif: 'Playfair Display', Georgia, serif;
+  --font-sans: 'Plus Jakarta Sans', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  
+  --text-main: #173B57;          /* Azul profundo para títulos e texto de alto contraste */
+  --text-body: #2C3E50;          /* Cinza escuro azulado para parágrafos */
+  --text-muted: #5F7488;         /* Texto secundário/autor */
+  --text-dim: #8FA2B5;           /* Legendas e metadados discretos */
+
+  /* Bordas e Divisórias Suaves */
+  --border-warm: #E6DCCD;
+  --border-card: #E3D9C7;
+  --border-focus: #173B57;
+
+  /* Sombras Editoriais Suaves */
+  --shadow-sm: 0 2px 8px rgba(23, 59, 87, 0.05);
+  --shadow-card: 0 4px 16px rgba(23, 59, 87, 0.07), 0 1px 3px rgba(23, 59, 87, 0.04);
+  --shadow-hover: 0 12px 28px rgba(23, 59, 87, 0.12), 0 4px 10px rgba(23, 59, 87, 0.06);
+  --shadow-book: 2px 6px 16px rgba(15, 39, 60, 0.18), 0 1px 4px rgba(15, 39, 60, 0.1);
+
+  /* Raios de Arredondamento */
+  --radius-sm: 6px;
+  --radius-md: 12px;
+  --radius-lg: 18px;
+  --radius-pill: 9999px;
+
+  /* Transições Suaves */
+  --transition-fast: 0.18s ease;
+  --transition-smooth: 0.28s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+/* Reset Global */
+*, *::before, *::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html, body {
+  background-color: var(--bg-page);
+  color: var(--text-body);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.6;
+  min-height: 100vh;
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Seleção de Texto Cultural */
+::selection {
+  background-color: var(--accent-orange-light);
+  color: var(--primary-navy);
+}
+
+/* Scrollbar Editorial */
+::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+::-webkit-scrollbar-track {
+  background: var(--bg-page);
+}
+::-webkit-scrollbar-thumb {
+  background: #D8CEBC;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #BAAC96;
+}
+
+/* Estrutura Master */
+.site-wrapper {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+/* ==========================================================================
+   HEADER EDITORIAL SUPERIOR (Inspirado na Referência Visual)
+   ========================================================================== */
+.editorial-header {
+  position: sticky;
+  top: 0;
+  z-index: 50;
+  background-color: rgba(247, 241, 229, 0.94);
+  backdrop-filter: blur(14px);
+  border-bottom: 1px solid var(--border-warm);
+  transition: all var(--transition-fast);
+}
+
+.header-inner {
+  max-width: 1280px;
+  margin: 0 auto;
+  padding: 16px 32px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+/* Marca / Logo +Cultura */
+.header-brand {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  cursor: pointer;
+  text-decoration: none;
+  user-select: none;
+}
+
+.brand-logo-mark {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.brand-text-group {
+  display: flex;
+  flex-direction: column;
+}
+
+.brand-name {
+  font-family: var(--font-serif);
+  font-size: 26px;
+  font-weight: 800;
+  color: var(--primary-navy);
+  letter-spacing: -0.5px;
+  line-height: 1;
+}
+
+/* Navegação Central */
+.editorial-nav {
+  display: flex;
+  align-items: center;
+  gap: 32px;
+}
+
+.nav-item {
+  color: var(--text-muted);
+  text-decoration: none;
+  font-weight: 600;
+  font-size: 15px;
+  position: relative;
+  padding: 6px 0;
+  transition: color var(--transition-fast);
+}
+
+.nav-item:hover {
+  color: var(--primary-navy);
+}
+
+.nav-item.active {
+  color: var(--primary-navy);
+  font-weight: 700;
+}
+
+.nav-item.active::after {
+  content: '';
+  position: absolute;
+  bottom: -2px;
+  left: 0;
+  right: 0;
+  height: 2.5px;
+  border-radius: 2px;
+  background-color: var(--accent-orange);
+}
+
+/* Ações à Direita: Botão Adicionar & Perfil */
+.header-actions {
+  display: flex;
+  align-items: center;
+  gap: 16px;
+}
+
+.user-profile-menu-trigger {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 5px 10px 5px 5px;
+  background: var(--bg-card);
+  border: 1px solid var(--border-card);
+  border-radius: var(--radius-pill);
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  box-shadow: var(--shadow-sm);
+}
+
+.user-profile-menu-trigger:hover {
+  border-color: var(--primary-navy);
+  box-shadow: 0 4px 12px rgba(23, 59, 87, 0.1);
+}
+
+.user-header-avatar {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  object-fit: cover;
+}
+
+.user-header-name {
+  font-weight: 700;
+  font-size: 13.5px;
+  color: var(--primary-navy);
+}
+
+/* Main Wrapper Centralizado */
+.main-wrapper {
+  max-width: 1280px;
+  width: 100%;
+  margin: 0 auto;
+  padding: 36px 32px 64px 32px;
+  flex-grow: 1;
+  animation: editorialFadeIn 0.3s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes editorialFadeIn {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* ==========================================================================
+   RODAPÉ EDITORIAL
+   ========================================================================== */
+.editorial-footer {
+  border-top: 1px solid var(--border-warm);
+  background-color: #EFE7D8;
+  padding: 44px 32px 36px 32px;
+  color: var(--text-muted);
+  font-size: 13.5px;
+}
+
+.footer-inner {
+  max-width: 1280px;
+  margin: 0 auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  text-align: center;
+  gap: 18px;
+}
+
+.footer-links-row {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+  flex-wrap: wrap;
+  justify-content: center;
+}
+
+.footer-links-row a {
+  color: var(--primary-navy);
+  font-weight: 600;
+  text-decoration: none;
+  transition: color var(--transition-fast);
+}
+
+.footer-links-row a:hover {
+  color: var(--accent-orange);
+}
+
+.footer-social-row {
+  display: flex;
+  gap: 12px;
+}
+
+.social-circle {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background-color: #FFFFFF;
+  border: 1px solid var(--border-card);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 15px;
+  cursor: pointer;
+  transition: all var(--transition-fast);
+  color: var(--primary-navy);
+}
+
+.social-circle:hover {
+  background-color: var(--primary-navy);
+  color: #FFFFFF;
+  transform: translateY(-2px);
+}
+
+.footer-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.footer-motto {
+  font-style: italic;
+  color: var(--text-dim);
+  font-size: 13px;
+}

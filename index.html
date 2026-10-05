@@ -1,0 +1,163 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>+Cultura • Revista Cultural & Diário de Livros, Filmes e Séries</title>
+  <meta name="description" content="Mais livros. Mais filmes. Mais séries. Mais descobertas. Sua revista cultural digital e plataforma pessoal de entretenimento com recomendações que aprendem com você." />
+  <meta name="theme-color" content="#F7F1E5" />
+
+  <!-- Google Fonts: Playfair Display (Editorial Serif) & Plus Jakarta Sans (Clean Modern Sans) -->
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link href="https://fonts.googleapis.com/css2?family=Playfair+Display:ital,wght@0,600;0,700;0,800;1,600;1,700&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet" />
+
+  <!-- Stylesheets -->
+  <link rel="stylesheet" href="css/styles.css" />
+  <link rel="stylesheet" href="css/components.css" />
+  <link rel="stylesheet" href="css/responsive.css" />
+</head>
+<body class="editorial-body">
+  <div class="site-wrapper">
+    <!-- Top Editorial Header (Inspirado na Referência Visual) -->
+    <header class="editorial-header">
+      <div class="header-inner">
+        <!-- Logo +Cultura com Emblema Estilizado -->
+        <div class="header-brand" data-view="dashboard" title="+Cultura • Início">
+          <div class="brand-logo-mark">
+            <svg width="34" height="34" viewBox="0 0 34 34" fill="none" xmlns="http://www.w3.org/2000/svg">
+              <rect x="2" y="10" width="14" height="20" rx="3" fill="#F28C28" opacity="0.95" />
+              <rect x="12" y="4" width="14" height="26" rx="3" fill="#173B57" />
+              <rect x="20" y="12" width="12" height="18" rx="3" fill="#3E8E75" opacity="0.9" />
+              <line x1="8" y1="18" x2="16" y2="18" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" />
+              <line x1="12" y1="14" x2="12" y2="22" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" />
+            </svg>
+          </div>
+          <div class="brand-text-group">
+            <span class="brand-name">+Cultura</span>
+          </div>
+        </div>
+
+        <!-- Navegação Principal Editorial -->
+        <nav class="editorial-nav" aria-label="Navegação do Site">
+          <a href="#dashboard" class="nav-item active" data-view="dashboard" id="nav-dashboard">Início</a>
+          <a href="#books" class="nav-item" data-view="books" id="nav-books">Minhas Leituras</a>
+          <a href="#movies" class="nav-item" data-view="movies" id="nav-movies">Filmes</a>
+          <a href="#series" class="nav-item" data-view="series" id="nav-series">Séries</a>
+          <a href="#discover" class="nav-item" data-view="discover" id="nav-discover">Descobrir</a>
+        </nav>
+
+        <!-- Ações do Cabeçalho & Usuário -->
+        <div class="header-actions" id="user-header-bar">
+          <!-- Renderizado dinamicamente via UI.renderHeader() -->
+        </div>
+
+        <!-- Botão Mobile Menu Hamburger -->
+        <button class="mobile-toggle-btn" id="mobile-menu-toggle" aria-label="Abrir menu">
+          <span></span>
+          <span></span>
+          <span></span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Mobile Drawer & Backdrop -->
+    <div class="mobile-drawer-backdrop" id="mobile-drawer-backdrop"></div>
+    <aside class="mobile-drawer" id="mobile-drawer">
+      <div class="mobile-drawer-top">
+        <div class="brand-name-mobile">+Cultura</div>
+        <button class="mobile-drawer-close" id="mobile-drawer-close">✕</button>
+      </div>
+      <nav class="mobile-drawer-nav">
+        <a href="#dashboard" class="mobile-link active" data-view="dashboard">🏠 Início</a>
+        <a href="#books" class="mobile-link" data-view="books">📚 Minhas Leituras</a>
+        <a href="#movies" class="mobile-link" data-view="movies">🎬 Filmes</a>
+        <a href="#series" class="mobile-link" data-view="series">📺 Séries</a>
+        <a href="#discover" class="mobile-link" data-view="discover">🔎 Descobrir</a>
+        <a href="#favorites" class="mobile-link" data-view="favorites">❤️ Meus Favoritos</a>
+        <a href="#progress" class="mobile-link" data-view="progress">📊 Minha Jornada Cultural</a>
+        <a href="#profile" class="mobile-link" data-view="profile">👤 Meu Perfil</a>
+      </nav>
+      <div class="mobile-drawer-footer">
+        <button class="btn btn-primary w-full" onclick="UI.showAddModal()">＋ Adicionar Conteúdo</button>
+      </div>
+    </aside>
+
+    <!-- Main Container com Margens e Espaçamento Editorial -->
+    <main class="main-wrapper" id="main-content">
+      <!-- Vistas renderizadas dinamicamente por UI.navigate() -->
+    </main>
+
+    <!-- Rodapé Editorial (Inspirado na Referência Visual) -->
+    <footer class="editorial-footer">
+      <div class="footer-inner">
+        <div class="footer-links-row">
+          <a href="#dashboard" onclick="UI.navigate('dashboard'); return false;">Sobre o +Cultura</a>
+          <span>•</span>
+          <a href="#discover" onclick="UI.navigate('discover'); return false;">Descobrir</a>
+          <span>•</span>
+          <a href="#books" onclick="UI.navigate('books'); return false;">Minhas Leituras</a>
+          <span>•</span>
+          <a href="#progress" onclick="UI.navigate('progress'); return false;">Minha Jornada</a>
+          <span>•</span>
+          <a href="#profile" onclick="UI.navigate('profile'); return false;">Meu Perfil</a>
+        </div>
+
+        <div class="footer-social-row">
+          <div class="social-circle" title="Instagram">📷</div>
+          <div class="social-circle" title="Comunidade">📖</div>
+          <div class="social-circle" title="Cinema">+C</div>
+        </div>
+
+        <div class="footer-copy">
+          <p>© 2026 <strong>+Cultura</strong>. Todos os direitos reservados.</p>
+          <p class="footer-motto">"Mais livros. Mais filmes. Mais séries. Mais descobertas."</p>
+        </div>
+      </div>
+    </footer>
+  </div>
+
+  <!-- Mobile Bottom Navigation Bar -->
+  <nav class="mobile-bottom-nav" aria-label="Navegação Inferior Mobile">
+    <a href="#dashboard" class="mobile-nav-item active" data-view="dashboard">
+      <span class="mobile-nav-icon">🏠</span>
+      <span>Início</span>
+    </a>
+    <a href="#books" class="mobile-nav-item" data-view="books">
+      <span class="mobile-nav-icon">📚</span>
+      <span>Leituras</span>
+    </a>
+    <a href="#movies" class="mobile-nav-item" data-view="movies">
+      <span class="mobile-nav-icon">🎬</span>
+      <span>Filmes</span>
+    </a>
+    <a href="#series" class="mobile-nav-item" data-view="series">
+      <span class="mobile-nav-icon">📺</span>
+      <span>Séries</span>
+    </a>
+    <a href="#discover" class="mobile-nav-item" data-view="discover">
+      <span class="mobile-nav-icon">🔎</span>
+      <span>Descobrir</span>
+    </a>
+    <a href="#profile" class="mobile-nav-item" data-view="profile">
+      <span class="mobile-nav-icon">👤</span>
+      <span>Perfil</span>
+    </a>
+  </nav>
+
+  <!-- Global Modal Container -->
+  <div class="modal-container" id="modal-container" role="dialog" aria-modal="true"></div>
+
+  <!-- Toast Notification Container -->
+  <div class="toast-container" id="toast-container" aria-live="polite"></div>
+
+  <!-- Scripts -->
+  <script src="js/data.js"></script>
+  <script src="js/storage.js"></script>
+  <script src="js/recommender.js"></script>
+  <script src="js/stats.js"></script>
+  <script src="js/charts.js"></script>
+  <script src="js/ui.js"></script>
+  <script src="js/app.js"></script>
+</body>
+</html>
