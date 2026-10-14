@@ -544,7 +544,7 @@ const DEFAULT_CATALOG = [
 // Elegant editorial book placeholder if an external image fails to load
 function getFallbackCoverSvg(title, type) {
   const icon = type === 'book' ? '📖' : type === 'movie' ? '🎬' : '📺';
-  const cleanTitle = (title || 'Cultura').replace(/[<>&"]/g, '');
+  const cleanTitle = (title || 'Cultura').replace(/[<>&"']/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;', '"': '&quot;', "'": '&#39;' }[c]));
   const displayTitle = cleanTitle.length > 22 ? cleanTitle.substring(0, 20) + '...' : cleanTitle;
   
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="600" viewBox="0 0 400 600">
@@ -562,11 +562,11 @@ function getFallbackCoverSvg(title, type) {
     
     <line x1="80" y1="260" x2="320" y2="260" stroke="#F28C28" stroke-width="2" stroke-linecap="round"/>
     
-    <text x="200" y="330" font-family="'Playfair Display', Georgia, serif" font-size="24" font-weight="700" fill="#FFFFFF" text-anchor="middle">${displayTitle}</text>
-    <text x="200" y="380" font-family="'Plus Jakarta Sans', sans-serif" font-size="12" font-weight="600" letter-spacing="3" fill="#F28C28" text-anchor="middle">+CULTURA</text>
-    <text x="200" y="410" font-family="'Plus Jakarta Sans', sans-serif" font-size="11" fill="#CBD5E1" text-anchor="middle">EDIÇÃO DIGITAL</text>
+    <text x="200" y="330" font-family="Playfair Display, Georgia, serif" font-size="24" font-weight="700" fill="#FFFFFF" text-anchor="middle">${displayTitle}</text>
+    <text x="200" y="380" font-family="Plus Jakarta Sans, sans-serif" font-size="12" font-weight="600" letter-spacing="3" fill="#F28C28" text-anchor="middle">+CULTURA</text>
+    <text x="200" y="410" font-family="Plus Jakarta Sans, sans-serif" font-size="11" fill="#CBD5E1" text-anchor="middle">EDIÇÃO DIGITAL</text>
   </svg>`;
-  return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
+  return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg).replace(/'/g, '%27');
 }
 
 // Live External Search Integration for OpenLibrary (Books), iTunes (Movies) & TVMaze (Series)
@@ -755,11 +755,11 @@ const EDITORIAL_AVATARS = [
     <circle cx="80" cy="80" r="70" fill="none" stroke="#FFFFFF" stroke-width="1.5" stroke-opacity="0.2"/>
     <text x="80" y="88" font-size="52" text-anchor="middle" dominant-baseline="middle">${item.icon}</text>
     <rect x="36" y="122" width="88" height="20" rx="10" fill="#FAF6EE" fill-opacity="0.95"/>
-    <text x="80" y="136" font-family="'Plus Jakarta Sans', sans-serif" font-size="9" font-weight="800" letter-spacing="1.5" fill="${item.bg}" text-anchor="middle">${item.text}</text>
+    <text x="80" y="136" font-family="Plus Jakarta Sans, sans-serif" font-size="9" font-weight="800" letter-spacing="1.5" fill="${item.bg}" text-anchor="middle">${item.text}</text>
   </svg>`;
   return {
     ...item,
-    url: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg)
+    url: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg).replace(/'/g, '%27')
   };
 });
 

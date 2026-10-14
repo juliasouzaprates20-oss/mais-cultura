@@ -112,7 +112,7 @@ const UI = {
           <span>＋</span> Adicionar
         </button>
         <div class="user-profile-menu-trigger" onclick="UI.navigate('profile')" title="Ver meu perfil">
-          <img src="${userAvatar}" alt="${this.escapeHtml(user.name)}" class="user-header-avatar" onerror="this.src='${EDITORIAL_AVATARS ? EDITORIAL_AVATARS[0].url : ''}'"/>
+          <img src="${userAvatar}" alt="${this.escapeHtml(user.name)}" class="user-header-avatar" onerror="UI.handleAvatarError(this)"/>
           <span class="user-header-name">${this.escapeHtml(user.name.split(' ')[0])}${isDemoUser ? ' <em style="font-size:10px;opacity:0.75">(Demo)</em>' : ''}</span>
         </div>
         <button class="btn btn-ghost btn-sm" onclick="UI.handleLogout()" title="Sair da conta">
@@ -375,7 +375,7 @@ const UI = {
             ${inProgressItems.map(item => `
               <div class="continue-card" onclick="UI.showDetailModal('${item.id}', true)">
                 <div class="continue-thumb-side">
-                  <img src="${item.cover}" alt="${this.escapeHtml(item.title)}" onerror="this.src='${getFallbackCoverSvg(item.title, item.type)}'"/>
+                  <img src="${item.cover}" alt="${this.escapeHtml(item.title)}" onerror="UI.handleCoverError(this, '${item.type}')"/>
                 </div>
                 <div class="continue-info-side">
                   <span class="continue-tag">${item.type === 'book' ? '📖 Lendo Agora' : '📺 Assistindo Agora'}</span>
@@ -467,7 +467,7 @@ const UI = {
             alt="${this.escapeHtml(item.title)}"
             class="editorial-cover-img"
             loading="lazy"
-            onerror="this.src='${getFallbackCoverSvg(item.title, item.type)}'"
+            onerror="UI.handleCoverError(this, '${item.type}')"
           />
           <span class="editorial-type-badge">${typeLabel}</span>
           ${item.matchPercentage ? `<span class="editorial-match-tag">🔥 ${item.matchPercentage}%</span>` : ''}
@@ -914,7 +914,7 @@ const UI = {
     content.innerHTML = `
       <section class="editorial-hero-card" style="margin-bottom: 36px; padding: 36px;">
         <div style="display: flex; align-items: center; gap: 28px; flex-wrap: wrap;">
-          <img src="${userAvatar}" alt="${this.escapeHtml(user.name)}" style="width: 104px; height: 104px; border-radius: 50%; object-fit: cover; border: 3px solid var(--primary-navy); box-shadow: var(--shadow-card);" onerror="this.src='${EDITORIAL_AVATARS ? EDITORIAL_AVATARS[0].url : ''}'"/>
+          <img src="${userAvatar}" alt="${this.escapeHtml(user.name)}" style="width: 104px; height: 104px; border-radius: 50%; object-fit: cover; border: 3px solid var(--primary-navy); box-shadow: var(--shadow-card);" onerror="UI.handleAvatarError(this)"/>
           <div>
             <span class="hero-editorial-tag">Perfil Cultural</span>
             <h1 class="hero-main-title" style="font-size: 32px;">${this.escapeHtml(user.name)}</h1>
@@ -1015,7 +1015,7 @@ const UI = {
 
           <div class="detail-split-view">
             <div class="detail-poster-col">
-              <img src="${item.cover}" alt="${this.escapeHtml(item.title)}" class="detail-poster-img" onerror="this.src='${getFallbackCoverSvg(item.title, item.type)}'"/>
+              <img src="${item.cover}" alt="${this.escapeHtml(item.title)}" class="detail-poster-img" onerror="UI.handleCoverError(this, '${item.type}')"/>
             </div>
 
             <div class="detail-info-col">
@@ -1081,7 +1081,7 @@ const UI = {
                   <div class="detail-related-grid">
                     ${relatedItems.map(rel => `
                       <div class="detail-related-card" onclick="UI.showDetailModal('${rel.id}', false)">
-                        <img src="${rel.cover}" alt="${this.escapeHtml(rel.title)}" class="detail-related-thumb" onerror="this.src='${getFallbackCoverSvg(rel.title, rel.type)}'"/>
+                        <img src="${rel.cover}" alt="${this.escapeHtml(rel.title)}" class="detail-related-thumb" onerror="UI.handleCoverError(this, '${rel.type}')"/>
                         <h5 class="detail-related-info-title">${this.escapeHtml(rel.title)}</h5>
                         <p class="detail-related-info-creator">${this.escapeHtml(rel.creator)}</p>
                         <span class="detail-related-reason">${this.escapeHtml(rel.relationReason)}</span>
@@ -1272,7 +1272,7 @@ const UI = {
                 <div class="autocomplete-dropdown-header">RESULTADOS ENCONTRADOS (Clique para preencher)</div>
                 ${results.map((r, idx) => `
                   <div class="autocomplete-item" onclick="UI.applyAutofillItem(${idx})">
-                    <img src="${r.cover}" alt="${this.escapeHtml(r.title)}" class="autocomplete-thumb" onerror="this.src='${getFallbackCoverSvg(r.title, r.type)}'"/>
+                    <img src="${r.cover}" alt="${this.escapeHtml(r.title)}" class="autocomplete-thumb" onerror="UI.handleCoverError(this, '${r.type}')"/>
                     <div class="autocomplete-info">
                       <div class="autocomplete-title">${this.escapeHtml(r.title)}</div>
                       <div class="autocomplete-meta">${this.escapeHtml(r.creator)} • ${r.year || ''} • ${this.escapeHtml(r.genre)}</div>
@@ -1565,7 +1565,7 @@ const UI = {
           <div class="modal-body-scroll">
             <form id="form-quick-add" onsubmit="UI.handleConfirmQuickAdd(event, '${item.id}')">
               <div style="display: flex; gap: 16px; padding: 18px 24px; background: #FAF6EE; border-bottom: 1px solid var(--border-warm);">
-                <img src="${item.cover}" alt="${this.escapeHtml(item.title)}" style="width: 58px; height: 84px; object-fit: cover; border-radius: 4px; box-shadow: var(--shadow-book);" onerror="this.src='${getFallbackCoverSvg(item.title, item.type)}'"/>
+                <img src="${item.cover}" alt="${this.escapeHtml(item.title)}" style="width: 58px; height: 84px; object-fit: cover; border-radius: 4px; box-shadow: var(--shadow-book);" onerror="UI.handleCoverError(this, '${item.type}')"/>
                 <div>
                   <h4 style="font-family: var(--font-serif); font-size: 18px; color: var(--primary-navy);">${this.escapeHtml(item.title)}</h4>
                   <p style="font-size: 13.5px; color: var(--text-muted); margin-top: 2px;">${this.escapeHtml(item.creator)} • ${this.escapeHtml(item.genre)} (${item.year || ''})</p>
@@ -1916,7 +1916,7 @@ const UI = {
                     ${(EDITORIAL_AVATARS || []).map(av => `
                       <div
                         class="avatar-grid-item ${this.selectedAvatarUrl === av.url ? 'selected' : ''}"
-                        onclick="UI.selectPresetAvatar('${encodeURIComponent(av.url)}', this)"
+                        onclick="UI.selectPresetAvatar('${av.id}', this)"
                         title="${av.name}"
                       >
                         <img src="${av.url}" alt="${av.name}" class="avatar-grid-thumb"/>
@@ -1939,7 +1939,7 @@ const UI = {
                     oninput="UI.handleCustomPhotoInput(this.value)"
                   />
                   <div style="margin-top: 12px; display: flex; align-items: center; gap: 12px;">
-                    <img id="custom-photo-preview" src="${this.selectedAvatarUrl}" style="width: 50px; height: 50px; border-radius: 50%; object-fit: cover; border: 2px solid var(--primary-navy);" onerror="this.src='${EDITORIAL_AVATARS ? EDITORIAL_AVATARS[0].url : ''}'"/>
+                    <img id="custom-photo-preview" src="${this.selectedAvatarUrl}" style="width: 50px; height: 50px; border-radius: 50%; object-fit: cover; border: 2px solid var(--primary-navy);" onerror="UI.handleAvatarError(this)"/>
                     <span style="font-size: 12px; color: var(--text-muted);">Prévia da foto de perfil</span>
                   </div>
                 </div>
@@ -1983,8 +1983,12 @@ const UI = {
     }
   },
 
-  selectPresetAvatar(encodedUrl, element) {
-    const url = decodeURIComponent(encodedUrl);
+  selectPresetAvatar(avatarId, element) {
+    const avatar = (typeof EDITORIAL_AVATARS !== 'undefined' && EDITORIAL_AVATARS)
+      ? EDITORIAL_AVATARS.find(a => a.id === avatarId)
+      : null;
+    const url = avatar ? avatar.url : '';
+    if (!url) return;
     this.selectedAvatarUrl = url;
     const hiddenInput = document.getElementById('profile-avatar-hidden-input');
     if (hiddenInput) hiddenInput.value = url;
@@ -2064,6 +2068,20 @@ const UI = {
       toast.classList.add('toast-fade-out');
       setTimeout(() => toast.remove(), 400);
     }, 3800);
+  },
+
+  // Safe fallback for cover images — called at runtime, never embeds SVG data in HTML attributes
+  handleCoverError(img, type) {
+    img.onerror = null;
+    img.src = getFallbackCoverSvg('', type || 'book');
+  },
+
+  // Safe fallback for avatar images — called at runtime
+  handleAvatarError(img) {
+    img.onerror = null;
+    if (typeof EDITORIAL_AVATARS !== 'undefined' && EDITORIAL_AVATARS && EDITORIAL_AVATARS[0]) {
+      img.src = EDITORIAL_AVATARS[0].url;
+    }
   },
 
   escapeHtml(text) {
