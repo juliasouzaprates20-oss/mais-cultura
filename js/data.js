@@ -569,16 +569,21 @@ function getFallbackCoverSvg(title, type) {
   return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg);
 }
 
-// Live External Search Integration for OpenLibrary (Books) & iTunes/TVMaze (Movies/Series)
+// Live External Search Integration for OpenLibrary (Books), iTunes (Movies) & TVMaze (Series)
 const SearchService = {
+  _cache: new Map(),
+
   async searchBooksOpenLibrary(query) {
     if (!query || query.trim().length < 2) return [];
+    const cacheKey = `book_${query.trim().toLowerCase()}`;
+    if (this._cache.has(cacheKey)) return this._cache.get(cacheKey);
+
     try {
       const url = `https://openlibrary.org/search.json?q=${encodeURIComponent(query)}&limit=8`;
       const res = await fetch(url);
       if (!res.ok) return [];
       const data = await res.json();
-      return (data.docs || []).map(doc => {
+      const results = (data.docs || []).map(doc => {
         const coverId = doc.cover_i;
         const isbn = doc.isbn ? doc.isbn[0] : null;
         const coverUrl = coverId 
@@ -587,51 +592,174 @@ const SearchService = {
           ? `https://covers.openlibrary.org/b/isbn/${isbn}-L.jpg`
           : getFallbackCoverSvg(doc.title, 'book');
 
+        const genres = Array.isArray(doc.subject) && doc.subject.length > 0 
+          ? doc.subject.slice(0, 3) 
+          : ['Literatura'];
+
         return {
-          id: `ol_${doc.key.replace('/works/', '')}`,
+          id: `ol_${(doc.key || '').replace('/works/', '') || Date.now()}`,
           type: 'book',
-          title: doc.title,
+          title: doc.title || 'Sem título',
           creator: doc.author_name ? doc.author_name[0] : 'Autor desconhecido',
-          genre: doc.subject ? doc.subject[0] : 'Literatura',
-          genres: doc.subject ? doc.subject.slice(0, 3) : ['Literatura'],
+          genre: genres[0],
+          genres: genres,
           year: doc.first_publish_year || new Date().getFullYear(),
-          pages: doc.number_of_pages_median || 320,
+          pages: doc.number_of_pages_median || (doc.number_of_pages ? doc.number_of_pages[0] : 320),
+          isbn: isbn || '',
+          publisher: doc.publisher ? doc.publisher[0] : '',
           cover: coverUrl,
-          rating: 4.7,
-          synopsis: `Obra mundialmente catalogada no acervo Open Library. Primeira publicação em ${doc.first_publish_year || 'ano clássico'}.`,
-          tags: doc.subject ? doc.subject.slice(0, 4) : ['livro', 'leitura']
+          rating: 4.8,
+          synopsis: `Obra do acervo Open Library. Primeira publicação registrada em ${doc.first_publish_year || 'edição clássica'}.`,
+          tags: genres.map(g => g.toLowerCase())
         };
       });
+
+      this._cache.set(cacheKey, results);
+      return results;
     } catch (e) {
-      console.warn('Open Library search fallback to local catalog', e);
+      console.warn('Open Library search fallback', e);
       return [];
     }
   },
 
   async searchMoviesItunes(query) {
     if (!query || query.trim().length < 2) return [];
+    const cacheKey = `movie_${query.trim().toLowerCase()}`;
+    if (this._cache.has(cacheKey)) return this._cache.get(cacheKey);
+
     try {
       const url = `https://itunes.apple.com/search?term=${encodeURIComponent(query)}&entity=movie&limit=8`;
       const res = await fetch(url);
       if (!res.ok) return [];
       const data = await res.json();
-      return (data.results || []).map(item => ({
+      const results = (data.results || []).map(item => ({
         id: `itunes_${item.trackId}`,
         type: 'movie',
-        title: item.trackName,
-        creator: item.artistName || 'Diretor',
+        title: item.trackName || 'Sem título',
+        creator: item.artistName || 'Diretor aclamado',
         genre: item.primaryGenreName || 'Cinema',
         genres: [item.primaryGenreName || 'Cinema'],
         year: item.releaseDate ? new Date(item.releaseDate).getFullYear() : 2020,
         duration: Math.round((item.trackTimeMillis || 7200000) / 60000),
-        cover: (item.artworkUrl100 || '').replace('100x100bb', '600x600bb'),
+        cover: (item.artworkUrl100 || '').replace('100x100bb', '600x600bb') || getFallbackCoverSvg(item.trackName, 'movie'),
         rating: 4.8,
-        synopsis: item.longDescription || item.shortDescription || 'Produção cinematográfica aclamada.',
+        synopsis: item.longDescription || item.shortDescription || 'Produção cinematográfica de destaque.',
         tags: [item.primaryGenreName || 'Cinema', 'filme']
       }));
+
+      this._cache.set(cacheKey, results);
+      return results;
     } catch (e) {
       console.warn('iTunes search fallback', e);
       return [];
     }
+  },
+
+  async searchSeriesTVMaze(query) {
+    if (!query || query.trim().length < 2) return [];
+    const cacheKey = `series_${query.trim().toLowerCase()}`;
+    if (this._cache.has(cacheKey)) return this._cache.get(cacheKey);
+
+    try {
+      const url = `https://api.tvmaze.com/search/shows?q=${encodeURIComponent(query)}`;
+      const res = await fetch(url);
+      if (!res.ok) return [];
+      const data = await res.json();
+      const results = (data || []).slice(0, 8).map(entry => {
+        const show = entry.show || {};
+        const year = show.premiered ? new Date(show.premiered).getFullYear() : 2021;
+        const genres = Array.isArray(show.genres) && show.genres.length > 0 ? show.genres : ['Drama'];
+        const cover = (show.image && (show.image.original || show.image.medium)) 
+          ? (show.image.original || show.image.medium) 
+          : getFallbackCoverSvg(show.name, 'series');
+        
+        // Clean summary tags
+        const cleanSummary = (show.summary || '').replace(/<[^>]*>?/gm, '').trim();
+
+        // Estimate seasons and episodes based on show status/type
+        let seasons = 1;
+        let episodes = 10;
+        if (show.status === 'Ended') {
+          seasons = 3;
+          episodes = 28;
+        }
+
+        const creator = (show.network && show.network.name) || 
+                        (show.webChannel && show.webChannel.name) || 
+                        'Showrunner Cultural';
+
+        return {
+          id: `tvmaze_${show.id}`,
+          type: 'series',
+          title: show.name || 'Sem título',
+          creator: creator,
+          genre: genres[0],
+          genres: genres,
+          year: year,
+          seasons: seasons,
+          episodes: episodes,
+          cover: cover,
+          rating: show.rating && show.rating.average ? Math.min(5, (show.rating.average / 2)).toFixed(1) : 4.8,
+          synopsis: cleanSummary || 'Série aclamada com narrativa instigante.',
+          tags: genres.map(g => g.toLowerCase())
+        };
+      });
+
+      this._cache.set(cacheKey, results);
+      return results;
+    } catch (e) {
+      console.warn('TVMaze search fallback', e);
+      return [];
+    }
+  },
+
+  async searchAll(query) {
+    if (!query || query.trim().length < 2) return { books: [], movies: [], series: [] };
+    const [books, movies, series] = await Promise.all([
+      this.searchBooksOpenLibrary(query),
+      this.searchMoviesItunes(query),
+      this.searchSeriesTVMaze(query)
+    ]);
+    return { books, movies, series };
   }
 };
+
+// 16 Avatares Editoriais Culturais Estilizados (Vetores SVG Puros e Acolhedores)
+const EDITORIAL_AVATARS = [
+  { id: 'av_leitor', name: 'Leitor Voraz', icon: '📖', bg: '#173B57', accent: '#F28C28', text: 'LEITOR' },
+  { id: 'av_cinefilo', name: 'Cinéfilo Clássico', icon: '🎬', bg: '#0E273C', accent: '#F59E0B', text: 'CINEMA' },
+  { id: 'av_escritora', name: 'Escritora Criativa', icon: '✒️', bg: '#3E8E75', accent: '#FAF6EE', text: 'AUTORA' },
+  { id: 'av_filosofo', name: 'Filósofo Reflexivo', icon: '🏛️', bg: '#2C3E50', accent: '#E6DCCD', text: 'PENSAR' },
+  { id: 'av_maratona', name: 'Maratonista Séries', icon: '📺', bg: '#F28C28', accent: '#173B57', text: 'SÉRIES' },
+  { id: 'av_critico', name: 'Crítico Cultural', icon: '🧐', bg: '#4A6572', accent: '#FDF3E7', text: 'CRÍTICA' },
+  { id: 'av_poeta', name: 'Poeta Romântico', icon: '📜', bg: '#8D6E63', accent: '#F59E0B', text: 'POESIA' },
+  { id: 'av_diretora', name: 'Diretora de Arte', icon: '🎥', bg: '#1B3B4B', accent: '#F28C28', text: 'DIREÇÃO' },
+  { id: 'av_explorador', name: 'Ficção & Cosmos', icon: '🪐', bg: '#122538', accent: '#3E8E75', text: 'SCI-FI' },
+  { id: 'av_arte', name: 'Amante das Artes', icon: '🎨', bg: '#D9534F', accent: '#FAF6EE', text: 'ARTES' },
+  { id: 'av_fantasia', name: 'Mundo Fantástico', icon: '🐉', bg: '#28536B', accent: '#F59E0B', text: 'FANTASIA' },
+  { id: 'av_dramaturgo', name: 'Dramaturgo', icon: '🎭', bg: '#34495E', accent: '#E74C3C', text: 'TEATRO' },
+  { id: 'av_historiador', name: 'Historiador', icon: '⏳', bg: '#5D4037', accent: '#FFE0B2', text: 'HISTÓRIA' },
+  { id: 'av_musico', name: 'Trilha Sonora', icon: '🎻', bg: '#2E4053', accent: '#F28C28', text: 'MÚSICA' },
+  { id: 'av_cafe', name: 'Café & Leituras', icon: '☕', bg: '#6F4E37', accent: '#FFF8DC', text: 'CAFÉ' },
+  { id: 'av_enxadrista', name: 'Estrategista', icon: '♟️', bg: '#173B57', accent: '#3E8E75', text: 'ESTRATÉGIA' }
+].map(item => {
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="160" height="160" viewBox="0 0 160 160">
+    <defs>
+      <linearGradient id="grad_${item.id}" x1="0%" y1="0%" x2="100%" y2="100%">
+        <stop offset="0%" stop-color="${item.bg}"/>
+        <stop offset="100%" stop-color="#091825"/>
+      </linearGradient>
+    </defs>
+    <rect width="160" height="160" rx="80" fill="url(#grad_${item.id})"/>
+    <circle cx="80" cy="80" r="74" fill="none" stroke="${item.accent}" stroke-width="3" stroke-opacity="0.45"/>
+    <circle cx="80" cy="80" r="70" fill="none" stroke="#FFFFFF" stroke-width="1.5" stroke-opacity="0.2"/>
+    <text x="80" y="88" font-size="52" text-anchor="middle" dominant-baseline="middle">${item.icon}</text>
+    <rect x="36" y="122" width="88" height="20" rx="10" fill="#FAF6EE" fill-opacity="0.95"/>
+    <text x="80" y="136" font-family="'Plus Jakarta Sans', sans-serif" font-size="9" font-weight="800" letter-spacing="1.5" fill="${item.bg}" text-anchor="middle">${item.text}</text>
+  </svg>`;
+  return {
+    ...item,
+    url: 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg)
+  };
+});
+

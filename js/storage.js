@@ -6,7 +6,8 @@ const STORAGE_KEYS = {
   CURRENT_USER_ID: 'mais_cultura_current_user_id_v4',
   CATALOG: 'mais_cultura_catalog_v4',
   USER_ITEMS_PREFIX: 'mais_cultura_items_v4_',
-  USER_ACTIVITY_PREFIX: 'mais_cultura_activity_v4_'
+  USER_ACTIVITY_PREFIX: 'mais_cultura_activity_v4_',
+  DEMO_SESSION: 'mais_cultura_demo_session_v4'
 };
 
 const Storage = {
@@ -20,9 +21,20 @@ const Storage = {
     if (users.length === 0) {
       this.seedDemoUser();
     }
+
+    // Limpeza de segurança: se houver sessão demo legada gravada no localStorage
+    // sem que o usuário tenha clicado explicitamente em "Explorar demonstração" nesta sessão,
+    // remove-a imediatamente para garantir que a tela de autenticação seja exibida!
+    const currentId = localStorage.getItem(STORAGE_KEYS.CURRENT_USER_ID);
+    if (currentId === 'usr_demo_lucas') {
+      const isDemoActiveInSession = sessionStorage.getItem(STORAGE_KEYS.DEMO_SESSION) === 'true';
+      if (!isDemoActiveInSession) {
+        localStorage.removeItem(STORAGE_KEYS.CURRENT_USER_ID);
+      }
+    }
   },
 
-  // ------------------ USERS ------------------
+  // ------------------ USERS & SESSIONS ------------------
   getUsers() {
     try {
       const data = localStorage.getItem(STORAGE_KEYS.USERS);
@@ -40,6 +52,19 @@ const Storage = {
   getCurrentUser() {
     const currentId = localStorage.getItem(STORAGE_KEYS.CURRENT_USER_ID);
     if (!currentId) return null;
+
+    // Regra estrita para a conta Demo:
+    // A conta demo NUNCA pode entrar automaticamente.
+    // Ela só é válida se tiver sido iniciada explicitamente nesta sessão do navegador (sessionStorage).
+    if (currentId === 'usr_demo_lucas') {
+      const isDemoActiveInSession = sessionStorage.getItem(STORAGE_KEYS.DEMO_SESSION) === 'true';
+      if (!isDemoActiveInSession) {
+        // Sessão demo antiga ou não consentida: purgar e retornar null
+        localStorage.removeItem(STORAGE_KEYS.CURRENT_USER_ID);
+        return null;
+      }
+    }
+
     const users = this.getUsers();
     return users.find(u => u.id === currentId) || null;
   },
@@ -47,10 +72,28 @@ const Storage = {
   setCurrentUser(user) {
     if (user && user.id) {
       localStorage.setItem(STORAGE_KEYS.CURRENT_USER_ID, user.id);
+      if (user.id === 'usr_demo_lucas') {
+        sessionStorage.setItem(STORAGE_KEYS.DEMO_SESSION, 'true');
+      } else {
+        sessionStorage.removeItem(STORAGE_KEYS.DEMO_SESSION);
+      }
     } else {
       localStorage.removeItem(STORAGE_KEYS.CURRENT_USER_ID);
+      sessionStorage.removeItem(STORAGE_KEYS.DEMO_SESSION);
     }
   },
+
+  startDemoSession() {
+    this.seedDemoUser();
+    const users = this.getUsers();
+    const demo = users.find(u => u.id === 'usr_demo_lucas');
+    if (!demo) return null;
+
+    sessionStorage.setItem(STORAGE_KEYS.DEMO_SESSION, 'true');
+    localStorage.setItem(STORAGE_KEYS.CURRENT_USER_ID, demo.id);
+    return demo;
+  },
+
 
   registerUser(name, email, password, avatar = null, bio = '') {
     const cleanEmail = email.trim().toLowerCase();
@@ -105,6 +148,8 @@ const Storage = {
 
   logoutUser() {
     this.setCurrentUser(null);
+    localStorage.removeItem(STORAGE_KEYS.CURRENT_USER_ID);
+    sessionStorage.removeItem(STORAGE_KEYS.DEMO_SESSION);
   },
 
   recoverPassword(email, newPassword) {
@@ -172,6 +217,8 @@ const Storage = {
       cover: itemData.cover || getFallbackCoverSvg(itemData.title, itemData.type),
       synopsis: itemData.synopsis || '',
       tags: Array.isArray(itemData.tags) ? itemData.tags : [itemData.genre || 'Geral'],
+      isbn: itemData.isbn || '',
+      publisher: itemData.publisher || '',
 
       pages: itemData.type === 'book' ? Math.max(1, parseInt(itemData.pages, 10) || 100) : 0,
       duration: itemData.type === 'movie' ? Math.max(1, parseInt(itemData.duration, 10) || 90) : 0,
@@ -213,6 +260,9 @@ const Storage = {
       ...updates,
       updatedAt: new Date().toISOString()
     };
+
+    if (updates.isbn !== undefined) updated.isbn = updates.isbn;
+    if (updates.publisher !== undefined) updated.publisher = updates.publisher;
 
     if (updated.type === 'book' && updates.pages !== undefined) {
       updated.pages = Math.max(1, parseInt(updates.pages, 10) || 100);
@@ -644,8 +694,7 @@ const Storage = {
     ];
     this.saveUserActivity(demoId, demoActivities);
 
-    if (!this.getCurrentUser()) {
-      this.setCurrentUser(demoUser);
-    }
+    // NOTE: Demo user is seeded but NEVER auto-logged in.
+    // The user must explicitly click "Explorar demonstração" to enter demo mode.
   }
 };

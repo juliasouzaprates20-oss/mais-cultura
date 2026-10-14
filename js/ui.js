@@ -1,19 +1,32 @@
 // UI Controller for +Cultura • Digital Cultural Magazine
+// Complete UX, Auto-fill, Multi-Level Recommendations & Editorial Visuals
 
 const UI = {
-  currentView: 'dashboard',
+  currentView: 'auth',
   searchQuery: '',
   selectedGenreFilter: 'all',
   selectedStatusFilter: 'all',
   selectedSort: 'recent',
   externalSearchResults: [],
   isSearchingExternal: false,
+  _autofillDebounceTimer: null,
+  _globalSearchDebounceTimer: null,
+  selectedAvatarUrl: null,
+  currentModalType: 'book',
 
   // Initialize UI listeners and initial view
   init() {
     this.renderHeader();
     this.setupGlobalEvents();
-    this.navigate(this.currentView);
+
+    // Check if user already has an active session
+    // Never auto-log into demo on fresh visit!
+    const user = Storage.getCurrentUser();
+    if (user) {
+      this.navigate('dashboard');
+    } else {
+      this.navigate('auth');
+    }
   },
 
   // Navigate to a specific view
@@ -24,7 +37,7 @@ const UI = {
     this.selectedStatusFilter = 'all';
     this.externalSearchResults = [];
 
-    // Update active nav link
+    // Update active nav links
     document.querySelectorAll('.nav-item, .mobile-link, .mobile-nav-item').forEach(el => {
       const target = el.getAttribute('data-view') || (el.getAttribute('href') ? el.getAttribute('href').replace('#', '') : '');
       if (target === viewName) {
@@ -36,6 +49,18 @@ const UI = {
 
     const user = Storage.getCurrentUser();
     window.scrollTo({ top: 0, behavior: 'smooth' });
+
+    // Auth screen doesn't need a logged-in user
+    if (viewName === 'auth') {
+      this.renderAuth();
+      return;
+    }
+
+    // All other views require authentication
+    if (!user) {
+      this.renderAuth();
+      return;
+    }
 
     switch (viewName) {
       case 'dashboard':
@@ -73,14 +98,22 @@ const UI = {
     const userBar = document.getElementById('user-header-bar');
     if (!userBar) return;
 
+    const isDemoUser = user && user.id === 'usr_demo_lucas';
+
     if (user) {
+      const userAvatar = user.avatar || (EDITORIAL_AVATARS && EDITORIAL_AVATARS[0] ? EDITORIAL_AVATARS[0].url : 'https://api.dicebear.com/7.x/notionists/svg?seed=user');
       userBar.innerHTML = `
+        ${isDemoUser ? `
+          <span class="demo-badge" title="Você está no Modo Demonstração com dados fictícios">
+            🎮 Modo Demonstração
+          </span>
+        ` : ''}
         <button class="btn btn-primary btn-sm" onclick="UI.showAddModal()" title="Adicionar Livro, Filme ou Série">
           <span>＋</span> Adicionar
         </button>
-        <div class="user-profile-menu-trigger" onclick="UI.navigate('profile')">
-          <img src="${user.avatar}" alt="${user.name}" class="user-header-avatar" onerror="this.src='https://api.dicebear.com/7.x/notionists/svg?seed=user'"/>
-          <span class="user-header-name">${user.name.split(' ')[0]}</span>
+        <div class="user-profile-menu-trigger" onclick="UI.navigate('profile')" title="Ver meu perfil">
+          <img src="${userAvatar}" alt="${this.escapeHtml(user.name)}" class="user-header-avatar" onerror="this.src='${EDITORIAL_AVATARS ? EDITORIAL_AVATARS[0].url : ''}'"/>
+          <span class="user-header-name">${this.escapeHtml(user.name.split(' ')[0])}${isDemoUser ? ' <em style="font-size:10px;opacity:0.75">(Demo)</em>' : ''}</span>
         </div>
         <button class="btn btn-ghost btn-sm" onclick="UI.handleLogout()" title="Sair da conta">
           Sair
@@ -88,13 +121,162 @@ const UI = {
       `;
     } else {
       userBar.innerHTML = `
-        <button class="btn btn-secondary btn-sm" onclick="UI.showAuthModal('login')">Entrar</button>
-        <button class="btn btn-primary btn-sm" onclick="UI.showAuthModal('register')">Cadastrar</button>
+        <button class="btn btn-secondary btn-sm" onclick="UI.navigate('auth')">Entrar</button>
+        <button class="btn btn-primary btn-sm" onclick="UI.navigate('auth')">Cadastrar</button>
       `;
     }
   },
 
-  // ------------------ HOME / DASHBOARD EDITORIAL ------------------
+  // ------------------ AUTH SCREEN (Full Page) ------------------
+  renderAuth(initialTab = 'login') {
+    const content = document.getElementById('main-content');
+    content.innerHTML = `
+      <section class="auth-page-wrapper">
+        <div class="auth-page-card">
+          <!-- Logo e Tagline -->
+          <div class="auth-logo-block">
+            <div class="auth-logo-icon">
+              <svg width="42" height="42" viewBox="0 0 34 34" fill="none" xmlns="http://www.w3.org/2000/svg">
+                <rect x="2" y="10" width="14" height="20" rx="3" fill="#F28C28" opacity="0.95" />
+                <rect x="12" y="4" width="14" height="26" rx="3" fill="#173B57" />
+                <rect x="20" y="12" width="12" height="18" rx="3" fill="#3E8E75" opacity="0.9" />
+                <line x1="8" y1="18" x2="16" y2="18" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" />
+                <line x1="12" y1="14" x2="12" y2="22" stroke="#FFFFFF" stroke-width="2" stroke-linecap="round" />
+              </svg>
+            </div>
+            <h1 class="auth-brand-name">+Cultura</h1>
+            <p class="auth-tagline">Mais livros. Mais filmes. Mais séries. Mais descobertas.</p>
+          </div>
+
+          <!-- Abas Login / Criar Conta -->
+          <div class="auth-tabs">
+            <button
+              id="auth-tab-login"
+              class="auth-tab-btn ${initialTab === 'login' ? 'active' : ''}"
+              onclick="UI.renderAuth('login')"
+            >Entrar</button>
+            <button
+              id="auth-tab-register"
+              class="auth-tab-btn ${initialTab === 'register' ? 'active' : ''}"
+              onclick="UI.renderAuth('register')"
+            >Criar conta</button>
+          </div>
+
+          <!-- Formulário de Login -->
+          ${initialTab === 'login' ? `
+            <form id="auth-login-form" class="auth-form" onsubmit="UI.handleLoginSubmit(event)">
+              <div class="form-group">
+                <label class="auth-label" for="auth-email">E-mail</label>
+                <input
+                  type="email"
+                  id="auth-email"
+                  name="email"
+                  required
+                  class="form-input auth-input"
+                  placeholder="seu@email.com"
+                  autocomplete="email"
+                />
+              </div>
+              <div class="form-group">
+                <label class="auth-label" for="auth-password">Senha</label>
+                <input
+                  type="password"
+                  id="auth-password"
+                  name="password"
+                  required
+                  class="form-input auth-input"
+                  placeholder="Sua senha"
+                  autocomplete="current-password"
+                />
+              </div>
+              <button type="submit" class="btn btn-primary w-full auth-submit-btn">Entrar</button>
+              <button
+                type="button"
+                class="auth-forgot-link"
+                onclick="UI.showRecoverPasswordModal()"
+              >Esqueci minha senha</button>
+            </form>
+          ` : `
+            <form id="auth-register-form" class="auth-form" onsubmit="UI.handleRegisterSubmit(event)">
+              <div class="form-group">
+                <label class="auth-label" for="auth-name">Nome Completo</label>
+                <input
+                  type="text"
+                  id="auth-name"
+                  name="name"
+                  required
+                  class="form-input auth-input"
+                  placeholder="Seu nome completo"
+                  autocomplete="name"
+                />
+              </div>
+              <div class="form-group">
+                <label class="auth-label" for="auth-reg-email">E-mail</label>
+                <input
+                  type="email"
+                  id="auth-reg-email"
+                  name="email"
+                  required
+                  class="form-input auth-input"
+                  placeholder="seu@email.com"
+                  autocomplete="email"
+                />
+              </div>
+              <div class="form-group">
+                <label class="auth-label" for="auth-reg-password">Senha</label>
+                <input
+                  type="password"
+                  id="auth-reg-password"
+                  name="password"
+                  required
+                  minlength="4"
+                  class="form-input auth-input"
+                  placeholder="Mínimo 4 caracteres"
+                  autocomplete="new-password"
+                />
+              </div>
+              <div class="form-group">
+                <label class="auth-label" for="auth-reg-confirm">Confirmar Senha</label>
+                <input
+                  type="password"
+                  id="auth-reg-confirm"
+                  name="confirmPassword"
+                  required
+                  minlength="4"
+                  class="form-input auth-input"
+                  placeholder="Repita a senha"
+                  autocomplete="new-password"
+                />
+              </div>
+              <button type="submit" class="btn btn-primary w-full auth-submit-btn">Criar minha conta</button>
+            </form>
+          `}
+
+          <!-- Separador Editorial -->
+          <div class="auth-divider"><span>ou</span></div>
+
+          <!-- Botão Explícito para Modo Demonstração -->
+          <button
+            class="btn auth-demo-btn"
+            onclick="UI.handleInstantDemoLogin()"
+            title="Experimente a plataforma completa sem necessidade de cadastro"
+          >
+            🎮 Explorar demonstração
+          </button>
+          <p class="auth-demo-hint">
+            Acesse com um acervo ilustrativo (12 livros, 23 filmes e 8 séries reais) para testar todas as funcionalidades.
+          </p>
+        </div>
+      </section>
+    `;
+  },
+
+  // ------------------ GUEST WELCOME REDIRECT ------------------
+  renderGuestWelcome() {
+    this.navigate('auth');
+  },
+
+  // ------------------ DASHBOARD EDITORIAL PERSONALIZADO ------------------
   renderDashboard(user) {
     const content = document.getElementById('main-content');
     if (!user) {
@@ -106,27 +288,35 @@ const UI = {
     const recs = Recommender.getPersonalizedRecommendations(user.id);
     const allUserItems = Storage.getUserItems(user.id);
 
-    // In-progress items for "Continue de onde parou"
+    // Saudação personalizada por horário
+    const hour = new Date().getHours();
+    const greeting = hour >= 5 && hour < 12 ? 'Bom dia' : hour >= 12 && hour < 18 ? 'Boa tarde' : 'Boa noite';
+    const firstName = user.name ? user.name.split(' ')[0] : 'Leitor';
+
+    // Continue de onde parou (reading or watching)
     const inProgressItems = allUserItems.filter(i => i.status === 'reading' || i.status === 'watching');
 
-    // Unconsumed curated items for "Descubra algo novo"
-    const catalog = Storage.getCatalog();
-    const userConsumedTitles = new Set(allUserItems.map(i => i.title.toLowerCase().trim()));
-    const somethingNewItems = catalog.filter(c => !userConsumedTitles.has(c.title.toLowerCase().trim())).slice(0, 5);
+    // Para assistir / ler (wishlist)
+    const wishlistItems = allUserItems.filter(i => i.status === 'want_to_read' || i.status === 'want_to_watch');
+
+    // Descobertas recentes
+    const recentDiscoveries = [...allUserItems]
+      .sort((a, b) => new Date(b.addedAt || 0) - new Date(a.addedAt || 0))
+      .slice(0, 4);
 
     content.innerHTML = `
-      <!-- ================= HERO EDITORIAL ================= -->
+      <!-- ================= HERO EDITORIAL COM SAUDAÇÃO ================= -->
       <section class="editorial-hero-card">
         <div class="hero-left-content">
-          <span class="hero-editorial-tag">Revista Cultural Digital</span>
-          <h1 class="hero-main-title">Descubra histórias que combinam com você.</h1>
-          <p class="hero-subtitle">Explore livros, filmes e séries escolhidos especialmente para o seu gosto, e acompanhe sua trajetória cultural em um único lugar.</p>
+          <span class="hero-editorial-tag">Seu universo cultural</span>
+          <h1 class="hero-main-title">${greeting}, ${this.escapeHtml(firstName)} 👋</h1>
+          <p class="hero-subtitle">Descubra histórias selecionadas para seu gosto cultural e acompanhe suas leituras, sessões e maratonas em um único lugar.</p>
           <div class="hero-cta-group">
-            <button class="btn btn-primary btn-lg" onclick="UI.navigate('discover')">
-              Descobrir conteúdos
+            <button class="btn btn-primary btn-lg" onclick="UI.showAddModal()">
+              ＋ Adicionar Conteúdo
             </button>
-            <button class="btn btn-secondary btn-lg" onclick="UI.navigate('books')">
-              Minha biblioteca
+            <button class="btn btn-secondary btn-lg" onclick="UI.navigate('discover')">
+              🔍 Descobrir Obras
             </button>
           </div>
         </div>
@@ -135,46 +325,17 @@ const UI = {
         </div>
       </section>
 
-      <!-- ================= SEÇÃO 1: RECOMENDADOS PARA VOCÊ ================= -->
+      <!-- ================= ESTATÍSTICAS RÁPIDAS TRICOLORES ================= -->
       <section class="editorial-section">
-        <div class="section-editorial-header">
-          <h2 class="section-editorial-title">Recomendados para você</h2>
-          <a href="#discover" class="section-link-more" onclick="UI.navigate('discover'); return false;">Ver mais →</a>
-        </div>
-        <div class="editorial-cards-grid">
-          ${recs.all.slice(0, 6).map(item => this.renderEditorialCard(item, false)).join('')}
-        </div>
-      </section>
-
-      <!-- ================= SEÇÃO 2: PORQUE VOCÊ GOSTOU DE... ================= -->
-      ${recs.becauseYouLiked && recs.becauseYouLiked.length > 0 ? `
-        <section class="because-editorial-panel">
-          <div class="because-header-badge">
-            <span>💡</span> Recomendações com Motivo
-          </div>
-          <h3 class="because-headline-text">
-            Você avaliou "${recs.becauseYouLiked[0].anchorItem ? recs.becauseYouLiked[0].anchorItem.title : 'Duna'}" com ⭐⭐⭐⭐⭐
-          </h3>
-          <p class="because-sub-rationale">
-            "Por isso, selecionamos estas histórias com base nas suas preferências por narrativas aclamadas e autores favoritos."
-          </p>
-          <div class="because-items-grid">
-            ${recs.becauseYouLiked.slice(0, 4).map(item => this.renderEditorialCard(item, false, true)).join('')}
-          </div>
-        </section>
-      ` : ''}
-
-      <!-- ================= SEÇÃO 3: SUA JORNADA CULTURAL ================= -->
-      <section class="editorial-section">
-        <div class="journey-editorial-card">
+        <div class="journey-editorial-card" style="margin-bottom: 32px;">
           <div class="journey-top-row">
             <div class="journey-title-group">
-              <span class="hero-editorial-tag">Seu Diário Pessoal</span>
-              <h3>Sua jornada cultural</h3>
-              <p>Acompanhamento automático das suas leituras e maratonas em tempo real.</p>
+              <span class="hero-editorial-tag">Métricas Culturais</span>
+              <h3>Seu Universo em Números</h3>
+              <p>Progresso calculado em tempo real a partir das suas conclusões e avaliações.</p>
             </div>
             <button class="btn btn-secondary btn-sm" onclick="UI.navigate('progress')">
-              Ver Estatísticas Completas →
+              Ver Gráficos Detalhados →
             </button>
           </div>
 
@@ -182,12 +343,7 @@ const UI = {
             <div class="journey-metric-box" onclick="UI.navigate('books')" style="cursor: pointer;">
               <span class="journey-metric-label">📚 Livros lidos</span>
               <span class="journey-metric-number">${stats.books.read}</span>
-              <span class="journey-metric-sub">de ${stats.books.total} catalogados</span>
-            </div>
-            <div class="journey-metric-box">
-              <span class="journey-metric-label">📖 Páginas lidas</span>
-              <span class="journey-metric-number">${Stats.formatNumber(stats.books.totalPagesRead)}</span>
-              <span class="journey-metric-sub">páginas acumuladas</span>
+              <span class="journey-metric-sub">${Stats.formatNumber(stats.books.totalPagesRead)} páginas</span>
             </div>
             <div class="journey-metric-box" onclick="UI.navigate('movies')" style="cursor: pointer;">
               <span class="journey-metric-label">🎬 Filmes assistidos</span>
@@ -195,27 +351,25 @@ const UI = {
               <span class="journey-metric-sub">${stats.movies.formattedWatchTime} em tela</span>
             </div>
             <div class="journey-metric-box" onclick="UI.navigate('series')" style="cursor: pointer;">
-              <span class="journey-metric-label">📺 Séries assistidas</span>
+              <span class="journey-metric-label">📺 Séries finalizadas</span>
               <span class="journey-metric-number">${stats.series.completed}</span>
               <span class="journey-metric-sub">${stats.series.totalEpisodes} episódios</span>
             </div>
-          </div>
-
-          <!-- Barra Visual de Progresso Cultural -->
-          <div class="journey-progress-track" title="Distribuição do seu acervo cultural">
-            <div class="progress-seg-books"></div>
-            <div class="progress-seg-movies"></div>
-            <div class="progress-seg-series"></div>
+            <div class="journey-metric-box" onclick="UI.navigate('favorites')" style="cursor: pointer;">
+              <span class="journey-metric-label">❤️ Obras favoritas</span>
+              <span class="journey-metric-number">${stats.allFavoritesCount}</span>
+              <span class="journey-metric-sub">marcadas com carinho</span>
+            </div>
           </div>
         </div>
       </section>
 
-      <!-- ================= SEÇÃO 4: CONTINUE DE ONDE PAROU ================= -->
+      <!-- ================= SEÇÃO: CONTINUE DE ONDE PAROU ================= -->
       ${inProgressItems.length > 0 ? `
         <section class="editorial-section">
           <div class="section-editorial-header">
-            <h2 class="section-editorial-title">Continue de onde parou</h2>
-            <span class="text-muted" style="font-size: 13.5px;">Leituras e maratonas em andamento</span>
+            <h2 class="section-editorial-title">📖 Continue de onde parou</h2>
+            <span class="text-muted" style="font-size: 13.5px;">Obras atualmente em andamento</span>
           </div>
           <div class="continue-reading-container">
             ${inProgressItems.map(item => `
@@ -227,9 +381,12 @@ const UI = {
                   <span class="continue-tag">${item.type === 'book' ? '📖 Lendo Agora' : '📺 Assistindo Agora'}</span>
                   <h4 class="continue-title">${this.escapeHtml(item.title)}</h4>
                   <p class="continue-creator">${this.escapeHtml(item.creator)} • ${item.genre}</p>
-                  <div style="margin-top: 8px;">
+                  <p style="font-size: 12px; color: var(--accent-orange); font-weight: 700; margin-top: 4px;">
+                    ${item.type === 'book' ? `Páginas estimadas: ${item.pages || 320}` : `Em progresso`}
+                  </p>
+                  <div style="margin-top: 10px;">
                     <button class="btn btn-secondary btn-xs" onclick="event.stopPropagation(); UI.showEditItemModal('${item.id}')">
-                      Continuar
+                      ✏️ Atualizar Progresso
                     </button>
                   </div>
                 </div>
@@ -239,74 +396,66 @@ const UI = {
         </section>
       ` : ''}
 
-      <!-- ================= SEÇÃO 5: MINHA BIBLIOTECA (ABAS COLORIDAS) ================= -->
-      <section class="editorial-section">
-        <div class="section-editorial-header">
-          <h2 class="section-editorial-title">Minha Biblioteca</h2>
-          <a href="#books" class="section-link-more" onclick="UI.navigate('books'); return false;">Ver biblioteca completa →</a>
-        </div>
-
-        <div class="library-color-tabs">
-          <button class="tab-badge-btn tab-reading-orange" onclick="UI.navigate('books')">
-            Lendo Agora (${allUserItems.filter(i => i.status === 'reading').length})
-          </button>
-          <button class="tab-badge-btn tab-done-green" onclick="UI.navigate('books')">
-            Lidos (${stats.books.read})
-          </button>
-          <button class="tab-badge-btn tab-want-navy" onclick="UI.navigate('books')">
-            Desejados (${allUserItems.filter(i => i.status === 'want_to_read' || i.status === 'want_to_watch').length})
-          </button>
-        </div>
-
-        <div class="editorial-cards-grid">
-          ${allUserItems.slice(0, 6).map(item => this.renderEditorialCard(item, true)).join('')}
-        </div>
-      </section>
-
-      <!-- ================= SEÇÃO 6: DESCUBRA ALGO NOVO ================= -->
-      <section class="editorial-section">
-        <div class="section-editorial-header">
-          <h2 class="section-editorial-title">Descubra algo novo</h2>
-          <a href="#discover" class="section-link-more" onclick="UI.navigate('discover'); return false;">Explorar acervo →</a>
-        </div>
-        <div class="editorial-cards-grid">
-          ${somethingNewItems.map(item => this.renderEditorialCard(item, false)).join('')}
-        </div>
-      </section>
-    `;
-  },
-
-  // ------------------ GUEST WELCOME SCREEN ------------------
-  renderGuestWelcome() {
-    const content = document.getElementById('main-content');
-    content.innerHTML = `
-      <section class="editorial-hero-card" style="margin-top: 20px;">
-        <div class="hero-left-content">
-          <span class="hero-editorial-tag">+Cultura • Revista Cultural</span>
-          <h1 class="hero-main-title">Mais livros. Mais filmes. Mais séries. Mais descobertas.</h1>
-          <p class="hero-subtitle">
-            Acompanhe o que você lê e assiste com um motor de recomendações hiperpersonalizadas que aprende com cada avaliação sua.
-          </p>
-          <div class="hero-cta-group">
-            <button class="btn btn-primary btn-lg" onclick="UI.handleInstantDemoLogin()">
-              🚀 Entrar como Usuário Demo
-            </button>
-            <button class="btn btn-outline btn-lg" onclick="UI.showAuthModal('register')">
-              Criar Conta Gratuita
-            </button>
+      <!-- ================= SEÇÃO: PARA ASSISTIR / LER ================= -->
+      ${wishlistItems.length > 0 ? `
+        <section class="editorial-section">
+          <div class="section-editorial-header">
+            <h2 class="section-editorial-title">🎬 Para assistir & ler</h2>
+            <span class="text-muted" style="font-size: 13.5px;">Sua lista de interesses salvos</span>
           </div>
-          <p style="font-size: 13px; color: #5F7488; margin-top: 10px;">
-            A conta demo já vem pré-carregada com 12 livros (4.850 páginas), 23 filmes e 8 séries!
-          </p>
+          <div class="editorial-cards-grid">
+            ${wishlistItems.slice(0, 4).map(item => this.renderEditorialCard(item, true)).join('')}
+          </div>
+        </section>
+      ` : ''}
+
+      <!-- ================= SEÇÃO: TALVEZ VOCÊ GOSTE (COM EXPLICAÇÕES) ================= -->
+      <section class="editorial-section">
+        <div class="section-editorial-header">
+          <h2 class="section-editorial-title">✨ Talvez você goste</h2>
+          <a href="#discover" class="section-link-more" onclick="UI.navigate('discover'); return false;">Explorar mais recomendações →</a>
         </div>
-        <div class="hero-right-illustration">
-          <img src="assets/hero_books_art.jpg" alt="Revista +Cultura" class="hero-img-frame" />
+        <div class="editorial-cards-grid">
+          ${recs.all.slice(0, 6).map(item => this.renderEditorialCard(item, false, true)).join('')}
         </div>
       </section>
+
+      <!-- ================= SEÇÃO: PORQUE VOCÊ GOSTOU DE... ================= -->
+      ${recs.becauseYouLiked && recs.becauseYouLiked.length > 0 ? `
+        <section class="because-editorial-panel" style="margin-bottom: 40px;">
+          <div class="because-header-badge">
+            <span>💡</span> Recomendações com Motivo
+          </div>
+          <h3 class="because-headline-text">
+            ${recs.becauseYouLiked[0].anchorItem 
+              ? `Porque você gostou de "${recs.becauseYouLiked[0].anchorItem.title}"`
+              : 'Seleção especial alinhada aos seus gêneros preferidos'}
+          </h3>
+          <p class="because-sub-rationale">
+            ${recs.becauseYouLiked[0].rationale || 'Obras aclamadas com ritmo, estilo e autores que combinam com seu diário cultural.'}
+          </p>
+          <div class="because-items-grid">
+            ${recs.becauseYouLiked.slice(0, 4).map(item => this.renderEditorialCard(item, false, true)).join('')}
+          </div>
+        </section>
+      ` : ''}
+
+      <!-- ================= SEÇÃO: SUAS ÚLTIMAS DESCOBERTAS ================= -->
+      ${recentDiscoveries.length > 0 ? `
+        <section class="editorial-section">
+          <div class="section-editorial-header">
+            <h2 class="section-editorial-title">📝 Suas últimas descobertas</h2>
+            <a href="#books" class="section-link-more" onclick="UI.navigate('books'); return false;">Ver biblioteca inteira →</a>
+          </div>
+          <div class="editorial-cards-grid">
+            ${recentDiscoveries.map(item => this.renderEditorialCard(item, true)).join('')}
+          </div>
+        </section>
+      ` : ''}
     `;
   },
 
-  // ------------------ CARD EDITORIAL RENDERER (CAPAS REAIS) ------------------
+  // ------------------ CARD EDITORIAL RENDERER ------------------
   renderEditorialCard(item, isLibraryItem = true, showRationale = false) {
     const typeLabel = item.type === 'book' ? 'Livro' : item.type === 'movie' ? 'Filme' : 'Série';
 
@@ -338,22 +487,22 @@ const UI = {
           <p class="editorial-card-creator">${this.escapeHtml(item.creator)}</p>
 
           ${showRationale && item.rationale ? `
-            <p style="font-size: 11.5px; font-style: italic; color: #173B57; margin-bottom: 6px; line-height: 1.35;">
-              "${this.escapeHtml(item.rationale.substring(0, 60))}..."
+            <p style="font-size: 11.5px; font-style: italic; color: var(--primary-navy); margin-bottom: 6px; line-height: 1.35; background: #FAF6EE; padding: 4px 8px; border-radius: 4px; border-left: 2px solid var(--accent-orange);">
+              "${this.escapeHtml(item.rationale)}"
             </p>
           ` : ''}
 
           <div class="editorial-card-meta-row">
-            <span class="editorial-genre-pill">${item.genre}</span>
+            <span class="editorial-genre-pill">${this.escapeHtml(item.genre)}</span>
             <div class="editorial-rating-pill">
-              <span>★</span> ${(item.rating || 5.0).toFixed(1)}
+              <span>★</span> ${(parseFloat(item.rating) || 5.0).toFixed(1)}
             </div>
           </div>
 
           <div style="margin-top: 10px; display: flex; gap: 6px;">
             ${isLibraryItem ? `
               <button class="btn btn-outline btn-xs w-full" onclick="event.stopPropagation(); UI.showEditItemModal('${item.id}')">✏️ Editar</button>
-              <button class="btn btn-danger btn-xs" onclick="event.stopPropagation(); UI.handleDeleteItem('${item.id}')">🗑️</button>
+              <button class="btn btn-danger btn-xs" onclick="event.stopPropagation(); UI.handleDeleteItem('${item.id}')" title="Excluir obra">🗑️</button>
             ` : `
               <button class="btn btn-secondary btn-xs w-full" onclick="event.stopPropagation(); UI.showQuickAddModal('${item.id}')">
                 ＋ Adicionar
@@ -377,7 +526,6 @@ const UI = {
     const stats = Stats.computeUserStats(user.id);
     const typeLabel = type === 'book' ? 'Livros' : type === 'movie' ? 'Filmes' : 'Séries';
 
-    // Banner de métricas culturais
     let bannerHtml = '';
     if (type === 'book') {
       bannerHtml = `
@@ -388,7 +536,7 @@ const UI = {
           </h2>
           <div style="display: flex; gap: 12px; margin-top: 12px; flex-wrap: wrap;">
             <span class="editorial-genre-pill">📚 Média: ${stats.books.avgPagesPerBook} págs/livro</span>
-            <span class="editorial-genre-pill">🏆 Mais longo: ${stats.books.longestBook ? `${stats.books.longestBook.title} (${stats.books.longestBook.pages} pág)` : 'N/A'}</span>
+            <span class="editorial-genre-pill">🏆 Mais longo: ${stats.books.longestBook ? `${this.escapeHtml(stats.books.longestBook.title)} (${stats.books.longestBook.pages} pág)` : 'N/A'}</span>
             <span class="editorial-genre-pill">⚡ Gênero favorito: ${stats.books.topGenre}</span>
           </div>
         </div>
@@ -423,19 +571,17 @@ const UI = {
       `;
     }
 
-    // Status filter options
-    let statusFilters = [
+    const statusFilters = [
       { key: 'all', label: 'Todos' },
       { key: type === 'book' ? 'read' : type === 'movie' ? 'watched' : 'completed', label: type === 'book' ? 'Lidos' : type === 'movie' ? 'Assistidos' : 'Finalizadas' },
       { key: type === 'book' ? 'reading' : 'watching', label: type === 'book' ? 'Lendo Agora' : 'Assistindo' },
       { key: type === 'book' ? 'want_to_read' : 'want_to_watch', label: 'Quero Consumir' }
     ];
 
-    // Filter items
     let filtered = items.filter(item => {
       const matchSearch = !this.searchQuery ||
-        item.title.toLowerCase().includes(this.searchQuery.toLowerCase()) ||
-        item.creator.toLowerCase().includes(this.searchQuery.toLowerCase());
+        (item.title || '').toLowerCase().includes(this.searchQuery.toLowerCase()) ||
+        (item.creator || '').toLowerCase().includes(this.searchQuery.toLowerCase());
       const matchStatus = this.selectedStatusFilter === 'all' || item.status === this.selectedStatusFilter;
       const matchGenre = this.selectedGenreFilter === 'all' || item.genre === this.selectedGenreFilter;
       return matchSearch && matchStatus && matchGenre;
@@ -469,12 +615,12 @@ const UI = {
           `).join('')}
         </div>
 
-        <div style="display: flex; gap: 10px; align-items: center; flex-wrap: wrap;">
+        <div style="display: flex; gap: 10px; align-items: center; flex-grow: 1; max-width: 400px;">
           <input
             type="text"
             class="form-input"
-            style="padding: 7px 12px; font-size: 13.5px; width: 220px;"
-            placeholder="Buscar por título ou autor..."
+            style="width: 100%; padding: 8px 12px; font-size: 13.5px;"
+            placeholder="Filtrar por título ou autor/diretor..."
             value="${this.escapeHtml(this.searchQuery)}"
             oninput="UI.handleLibrarySearch(this.value, '${type}')"
           />
@@ -485,14 +631,15 @@ const UI = {
         </div>
       </div>
 
-      <div class="editorial-cards-grid">
+      <!-- Grade de Conteúdos -->
+      <div class="editorial-cards-grid" style="margin-top: 24px;">
         ${filtered.length > 0
           ? filtered.map(item => this.renderEditorialCard(item, true)).join('')
           : `
             <div style="grid-column: 1 / -1; padding: 48px; text-align: center; background: #FFFFFF; border-radius: var(--radius-md); border: 1px solid var(--border-warm);">
               <h3 style="font-family: var(--font-serif); font-size: 20px; color: var(--primary-navy); margin-bottom: 8px;">Nenhum conteúdo encontrado</h3>
-              <p style="color: var(--text-muted); margin-bottom: 16px;">Adicione uma obra ou altere os filtros selecionados.</p>
-              <button class="btn btn-primary btn-sm" onclick="UI.showAddModal('${type}')">Adicionar Conteúdo</button>
+              <p style="color: var(--text-muted); margin-bottom: 16px;">Você pode adicionar uma nova obra à sua biblioteca em poucos segundos.</p>
+              <button class="btn btn-primary btn-sm" onclick="UI.showAddModal('${type}')">Adicionar Agora</button>
             </div>
           `
         }
@@ -500,61 +647,58 @@ const UI = {
     `;
   },
 
-  // ------------------ DESCOBRIR (REFORMULADA COM PESQUISA AMPLA E DADOS REAIS) ------------------
+  // ------------------ BUSCA GLOBAL / DESCOBRIR REFORMULADA ------------------
   renderDiscover(user) {
     const content = document.getElementById('main-content');
-    const catalog = Storage.getCatalog();
+    const catalog = Storage.getCatalog() || [];
 
-    // Results to show: external search if active, or local catalog filtered
-    let itemsToShow = this.externalSearchResults.length > 0 ? this.externalSearchResults : catalog;
+    // Se houver busca externa ativa com resultados
+    const hasExternal = this.externalSearchResults.length > 0;
+    const items = hasExternal ? this.externalSearchResults : catalog;
 
-    let filtered = itemsToShow.filter(item => {
-      const matchType = this.selectedStatusFilter === 'all' || item.type === this.selectedStatusFilter;
-      const matchSearch = !this.searchQuery ||
-        item.title.toLowerCase().includes(this.searchQuery.toLowerCase()) ||
-        item.creator.toLowerCase().includes(this.searchQuery.toLowerCase()) ||
-        item.synopsis.toLowerCase().includes(this.searchQuery.toLowerCase());
-      const matchGenre = this.selectedGenreFilter === 'all' || item.genre === this.selectedGenreFilter;
-      return matchType && matchSearch && matchGenre;
-    });
+    // Agrupamento por tipo
+    const books = items.filter(i => i.type === 'book');
+    const movies = items.filter(i => i.type === 'movie');
+    const series = items.filter(i => i.type === 'series');
 
     const allGenres = Array.from(new Set(catalog.map(i => i.genre).filter(Boolean)));
 
     content.innerHTML = `
       <section class="discover-hero-banner">
-        <span class="hero-editorial-tag">Descobrir Novos Conteúdos</span>
-        <h1 class="discover-hero-title">Histórias, filmes e séries para despertar sua curiosidade.</h1>
-        <p class="discover-hero-sub">Explore o catálogo editorial com capas e pôsteres reais ou pesquise qualquer obra do mundo em tempo real.</p>
+        <span class="hero-editorial-tag">Busca Global & Descoberta</span>
+        <h1 class="discover-hero-title">Encontre qualquer livro, filme ou série do mundo.</h1>
+        <p class="discover-hero-sub">Pesquisa conectada em tempo real aos acervos mundiais (Open Library, iTunes & TVMaze) com capas e pôsteres oficiais.</p>
 
-        <!-- Barra de Pesquisa Grande -->
-        <form onsubmit="UI.handleDiscoverSubmitSearch(event)" class="discover-search-box-large">
-          <span style="font-size: 20px; color: #173B57; margin-left: 6px;">🔎</span>
-          <input
-            type="text"
-            id="discover-search-input-field"
-            class="discover-search-input"
-            placeholder="Pesquise por título, autor, diretor ou gênero..."
-            value="${this.escapeHtml(this.searchQuery)}"
-            oninput="UI.handleDiscoverLocalSearch(this.value)"
-          />
-          <button type="submit" class="discover-search-submit">
-            ${this.isSearchingExternal ? 'Buscando...' : 'Buscar no Acervo'}
-          </button>
-        </form>
+        <!-- Barra de Busca Global Ampla com Debounce -->
+        <div class="global-search-container">
+          <div class="global-search-bar">
+            <span style="font-size: 20px; color: var(--primary-navy); margin-right: 4px;">🔍</span>
+            <input
+              type="text"
+              id="global-search-field"
+              class="global-search-input"
+              placeholder="Digite o nome de qualquer livro, filme ou série..."
+              value="${this.escapeHtml(this.searchQuery)}"
+              oninput="UI.handleGlobalSearchInput(this.value)"
+            />
+            <span id="global-search-spinner" class="autofill-spinner" style="display: ${this.isSearchingExternal ? 'inline-block' : 'none'};">⏳</span>
+          </div>
+        </div>
 
+        <!-- Filtros Rápidos -->
         <div class="discover-filter-bar">
           <div class="discover-type-pills">
             <button class="type-pill-btn ${this.selectedStatusFilter === 'all' ? 'active' : ''}" onclick="UI.handleDiscoverType('all')">
-              🌟 Todos
+              🌟 Todos (${items.length})
             </button>
             <button class="type-pill-btn ${this.selectedStatusFilter === 'book' ? 'active' : ''}" onclick="UI.handleDiscoverType('book')">
-              📚 Livros
+              📚 Livros (${books.length})
             </button>
             <button class="type-pill-btn ${this.selectedStatusFilter === 'movie' ? 'active' : ''}" onclick="UI.handleDiscoverType('movie')">
-              🎬 Filmes
+              🎬 Filmes (${movies.length})
             </button>
             <button class="type-pill-btn ${this.selectedStatusFilter === 'series' ? 'active' : ''}" onclick="UI.handleDiscoverType('series')">
-              📺 Séries
+              📺 Séries (${series.length})
             </button>
           </div>
 
@@ -565,11 +709,103 @@ const UI = {
         </div>
       </section>
 
-      <!-- Grade Arejada de Descoberta -->
-      <div class="editorial-cards-grid">
-        ${filtered.map(item => this.renderEditorialCard(item, false)).join('')}
-      </div>
+      <!-- RESULTADOS AGRUPADOS (LIVROS, FILMES, SÉRIES) -->
+      ${(this.selectedStatusFilter === 'all' || this.selectedStatusFilter === 'book') && books.length > 0 ? `
+        <section class="editorial-section">
+          <div class="global-search-group-header">
+            <h2 class="global-search-group-title">📚 Livros</h2>
+            <span class="text-muted">${books.length} obras</span>
+          </div>
+          <div class="editorial-cards-grid">
+            ${books.map(b => this.renderEditorialCard(b, false)).join('')}
+          </div>
+        </section>
+      ` : ''}
+
+      ${(this.selectedStatusFilter === 'all' || this.selectedStatusFilter === 'movie') && movies.length > 0 ? `
+        <section class="editorial-section">
+          <div class="global-search-group-header">
+            <h2 class="global-search-group-title">🎬 Filmes</h2>
+            <span class="text-muted">${movies.length} títulos</span>
+          </div>
+          <div class="editorial-cards-grid">
+            ${movies.map(m => this.renderEditorialCard(m, false)).join('')}
+          </div>
+        </section>
+      ` : ''}
+
+      ${(this.selectedStatusFilter === 'all' || this.selectedStatusFilter === 'series') && series.length > 0 ? `
+        <section class="editorial-section">
+          <div class="global-search-group-header">
+            <h2 class="global-search-group-title">📺 Séries</h2>
+            <span class="text-muted">${series.length} produções</span>
+          </div>
+          <div class="editorial-cards-grid">
+            ${series.map(s => this.renderEditorialCard(s, false)).join('')}
+          </div>
+        </section>
+      ` : ''}
+
+      ${items.length === 0 ? `
+        <div style="padding: 48px; text-align: center; background: #FFFFFF; border-radius: var(--radius-md); border: 1px solid var(--border-warm); margin-top: 32px;">
+          <h3 style="font-family: var(--font-serif); font-size: 20px; color: var(--primary-navy); margin-bottom: 8px;">Nenhum conteúdo encontrado</h3>
+          <p style="color: var(--text-muted);">Tente pesquisar com outros termos ou adicione a obra manualmente pelo botão no topo.</p>
+        </div>
+      ` : ''}
     `;
+  },
+
+  handleGlobalSearchInput(val) {
+    this.searchQuery = val;
+    clearTimeout(this._globalSearchDebounceTimer);
+
+    if (!val || val.trim().length < 2) {
+      this.externalSearchResults = [];
+      this.isSearchingExternal = false;
+      this.renderDiscover(Storage.getCurrentUser());
+      return;
+    }
+
+    const spinner = document.getElementById('global-search-spinner');
+    if (spinner) spinner.style.display = 'inline-block';
+
+    this._globalSearchDebounceTimer = setTimeout(async () => {
+      this.isSearchingExternal = true;
+      try {
+        const { books, movies, series } = await SearchService.searchAll(val);
+        this.externalSearchResults = [...books, ...movies, ...series];
+      } catch (e) {
+        console.warn('Erro na busca global', e);
+      } finally {
+        this.isSearchingExternal = false;
+        this.renderDiscover(Storage.getCurrentUser());
+      }
+    }, 400);
+  },
+
+  handleDiscoverType(type) {
+    this.selectedStatusFilter = type;
+    this.renderDiscover(Storage.getCurrentUser());
+  },
+
+  handleDiscoverGenre(genre) {
+    this.selectedGenreFilter = genre;
+    this.renderDiscover(Storage.getCurrentUser());
+  },
+
+  handleLibrarySearch(val, type) {
+    this.searchQuery = val;
+    this.renderMediaLibrary(type, Storage.getCurrentUser());
+  },
+
+  handleStatusFilter(status, type) {
+    this.selectedStatusFilter = status;
+    this.renderMediaLibrary(type, Storage.getCurrentUser());
+  },
+
+  handleGenreFilter(genre, type) {
+    this.selectedGenreFilter = genre;
+    this.renderMediaLibrary(type, Storage.getCurrentUser());
   },
 
   // ------------------ MEUS FAVORITOS ------------------
@@ -602,7 +838,7 @@ const UI = {
     `;
   },
 
-  // ------------------ MEU PROGRESSO (ESTATÍSTICAS COMPLETAS) ------------------
+  // ------------------ MINHA JORNADA CULTURAL (ESTATÍSTICAS) ------------------
   renderProgress(user) {
     if (!user) {
       this.renderGuestWelcome();
@@ -664,7 +900,7 @@ const UI = {
     }, 40);
   },
 
-  // ------------------ MEU PERFIL EDITORIAL ------------------
+  // ------------------ MEU PERFIL EDITORIAL COM AVATAR ------------------
   renderProfile(user) {
     if (!user) {
       this.renderGuestWelcome();
@@ -673,22 +909,52 @@ const UI = {
     const content = document.getElementById('main-content');
     const stats = Stats.computeUserStats(user.id);
     const activities = Storage.getUserActivity(user.id);
+    const userAvatar = user.avatar || (EDITORIAL_AVATARS && EDITORIAL_AVATARS[0] ? EDITORIAL_AVATARS[0].url : '');
 
     content.innerHTML = `
       <section class="editorial-hero-card" style="margin-bottom: 36px; padding: 36px;">
         <div style="display: flex; align-items: center; gap: 28px; flex-wrap: wrap;">
-          <img src="${user.avatar}" alt="${user.name}" style="width: 100px; height: 100px; border-radius: 50%; object-fit: cover; border: 3px solid var(--primary-navy);" onerror="this.src='https://api.dicebear.com/7.x/notionists/svg?seed=user'"/>
+          <img src="${userAvatar}" alt="${this.escapeHtml(user.name)}" style="width: 104px; height: 104px; border-radius: 50%; object-fit: cover; border: 3px solid var(--primary-navy); box-shadow: var(--shadow-card);" onerror="this.src='${EDITORIAL_AVATARS ? EDITORIAL_AVATARS[0].url : ''}'"/>
           <div>
             <span class="hero-editorial-tag">Perfil Cultural</span>
-            <h1 class="hero-main-title" style="font-size: 32px;">${user.name}</h1>
-            <p style="color: var(--text-muted); font-size: 14px;">✉️ ${user.email}</p>
-            <p style="margin-top: 8px; color: var(--text-body); max-width: 600px;">${user.bio || 'Apaixonado por literatura, cinema e descobertas culturais.'}</p>
+            <h1 class="hero-main-title" style="font-size: 32px;">${this.escapeHtml(user.name)}</h1>
+            <p style="color: var(--text-muted); font-size: 14px;">✉️ ${this.escapeHtml(user.email)}</p>
+            <p style="margin-top: 8px; color: var(--text-body); max-width: 600px;">${this.escapeHtml(user.bio || 'Apaixonado por literatura, cinema e descobertas culturais.')}</p>
             <div style="display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap;">
-              ${(user.favoriteGenres || ['Ficção Científica', 'Drama', 'Fantasia']).map(g => `<span class="editorial-genre-pill">${g}</span>`).join('')}
+              ${(user.favoriteGenres || ['Ficção Científica', 'Drama', 'Fantasia']).map(g => `<span class="editorial-genre-pill">${this.escapeHtml(g)}</span>`).join('')}
             </div>
           </div>
           <div style="margin-left: auto;">
-            <button class="btn btn-outline btn-sm" onclick="UI.showEditProfileModal()">✏️ Editar Perfil</button>
+            <button class="btn btn-outline btn-sm" onclick="UI.showEditProfileModal()">✏️ Editar Perfil & Avatar</button>
+          </div>
+        </div>
+      </section>
+
+      <!-- Métricas Reais do Usuário no Perfil -->
+      <section class="editorial-section" style="margin-bottom: 36px;">
+        <div class="section-editorial-header">
+          <h2 class="section-editorial-title">📊 Estatísticas Pessoais Reais</h2>
+        </div>
+        <div class="journey-metrics-grid">
+          <div class="journey-metric-box">
+            <span class="journey-metric-label">📚 Leituras Concluídas</span>
+            <span class="journey-metric-number">${stats.books.read}</span>
+            <span class="journey-metric-sub">${Stats.formatNumber(stats.books.totalPagesRead)} págs lidas</span>
+          </div>
+          <div class="journey-metric-box">
+            <span class="journey-metric-label">🎬 Sessões de Cinema</span>
+            <span class="journey-metric-number">${stats.movies.watched}</span>
+            <span class="journey-metric-sub">Diretor top: ${this.escapeHtml(stats.movies.topDirector)}</span>
+          </div>
+          <div class="journey-metric-box">
+            <span class="journey-metric-label">📺 Séries Finalizadas</span>
+            <span class="journey-metric-number">${stats.series.completed}</span>
+            <span class="journey-metric-sub">${stats.series.totalSeasons} temporadas</span>
+          </div>
+          <div class="journey-metric-box">
+            <span class="journey-metric-label">⭐ Média de Notas</span>
+            <span class="journey-metric-number">${stats.avgGlobalRating}</span>
+            <span class="journey-metric-sub">${stats.allFavoritesCount} favoritadas</span>
           </div>
         </div>
       </section>
@@ -717,7 +983,7 @@ const UI = {
     `;
   },
 
-  // ------------------ MODAL DE DETALHES COM CAPA REAL GRANDE ------------------
+  // ------------------ MODAL DE DETALHES COMPLETA COM RECOMENDAÇÕES RELACIONADAS ------------------
   showDetailModal(itemId, isLibraryItem = true) {
     const user = Storage.getCurrentUser();
     let item = null;
@@ -731,15 +997,21 @@ const UI = {
     if (!item && user) {
       item = Storage.getUserItems(user.id).find(i => i.id === itemId);
     }
+    if (!item && this.externalSearchResults.length > 0) {
+      item = this.externalSearchResults.find(i => i.id === itemId);
+    }
     if (!item) return;
 
     const modal = document.getElementById('modal-container');
     const typeLabel = item.type === 'book' ? 'Livro' : item.type === 'movie' ? 'Filme' : 'Série';
 
+    // Buscar recomendações relacionadas ("Você também pode gostar")
+    const relatedItems = Recommender.getRelatedRecommendations(item, 4);
+
     modal.innerHTML = `
       <div class="modal-backdrop" onclick="UI.closeModal()">
         <div class="modal-card modal-detail-layout" onclick="event.stopPropagation()">
-          <button class="modal-close-btn" style="position: absolute; top: 16px; right: 16px; z-index: 10;" onclick="UI.closeModal()">✕</button>
+          <button class="modal-close-btn" style="position: absolute; top: 16px; right: 16px; z-index: 10;" onclick="UI.closeModal()" title="Fechar">✕</button>
 
           <div class="detail-split-view">
             <div class="detail-poster-col">
@@ -749,7 +1021,7 @@ const UI = {
             <div class="detail-info-col">
               <div class="detail-genres-row">
                 <span class="genre-tag-active">${typeLabel}</span>
-                <span class="genre-tag-active" style="background: #FDF3E7; color: var(--accent-orange);">${item.genre}</span>
+                <span class="genre-tag-active" style="background: #FDF3E7; color: var(--accent-orange);">${this.escapeHtml(item.genre)}</span>
                 <span style="font-size: 13px; color: var(--text-muted); align-self: center;">${item.year || ''}</span>
               </div>
 
@@ -759,18 +1031,21 @@ const UI = {
               <div class="detail-metrics-bar">
                 ${item.type === 'book' ? `
                   <div class="metric-pill">📖 <strong>${item.pages || 0}</strong> páginas</div>
+                  ${item.isbn ? `<div class="metric-pill">🔖 ISBN: <strong>${this.escapeHtml(item.isbn)}</strong></div>` : ''}
                 ` : item.type === 'movie' ? `
                   <div class="metric-pill">⏱️ <strong>${item.duration || 0}</strong> minutos</div>
                 ` : `
                   <div class="metric-pill">📺 <strong>${item.seasons || 1}</strong> temporadas</div>
+                  <div class="metric-pill">🎞️ <strong>${item.episodes || 10}</strong> episódios</div>
                 `}
-                <div class="metric-pill">⭐ <strong>${(item.rating || 5.0).toFixed(1)}</strong> / 5.0</div>
+                <div class="metric-pill">⭐ <strong>${(parseFloat(item.rating) || 5.0).toFixed(1)}</strong> / 5.0</div>
+                <div class="metric-pill" style="color: var(--accent-green);">Status: <strong>${Storage.formatStatus(item.type, item.status || 'read')}</strong></div>
               </div>
 
               <div class="detail-synopsis-box">
                 <h4>Sinopse da Obra</h4>
                 <p>${this.escapeHtml(item.synopsis || 'Uma das produções mais aclamadas da cultura mundial.')}</p>
-                ${item.cast ? `<p style="margin-top: 8px; font-size: 13px; color: var(--text-muted);"><strong>Destaques:</strong> ${this.escapeHtml(item.cast)}</p>` : ''}
+                ${item.publisher ? `<p style="margin-top: 6px; font-size: 12.5px; color: var(--text-muted);"><strong>Editora:</strong> ${this.escapeHtml(item.publisher)}</p>` : ''}
               </div>
 
               ${user && item.review ? `
@@ -780,18 +1055,41 @@ const UI = {
                 </div>
               ` : ''}
 
+              <!-- Ações Principais -->
               <div style="display: flex; gap: 12px; margin-top: 24px; flex-wrap: wrap;">
                 ${user ? `
                   <button class="btn btn-primary" onclick="UI.showQuickAddModal('${item.id}')">
-                    ${isLibraryItem ? '✏️ Alterar Status / Nota' : '＋ Adicionar à Minha Biblioteca'}
+                    ${isLibraryItem ? '✏️ Alterar Status / Avaliação' : '＋ Adicionar à Minha Biblioteca'}
                   </button>
                   <button class="btn btn-outline" onclick="UI.handleToggleFavorite('${item.id}')">
                     ${item.isFavorite ? '❤️ Favoritado' : '🤍 Favoritar'}
                   </button>
+                  ${isLibraryItem ? `
+                    <button class="btn btn-danger" onclick="UI.handleDeleteItem('${item.id}')">
+                      🗑️ Remover da Biblioteca
+                    </button>
+                  ` : ''}
                 ` : `
                   <button class="btn btn-primary" onclick="UI.showAuthModal('login')">Entrar para Salvar</button>
                 `}
               </div>
+
+              <!-- SEÇÃO: VOCÊ TAMBÉM PODE GOSTAR -->
+              ${relatedItems.length > 0 ? `
+                <div class="detail-related-section">
+                  <h3 class="detail-related-title">✨ Você também pode gostar</h3>
+                  <div class="detail-related-grid">
+                    ${relatedItems.map(rel => `
+                      <div class="detail-related-card" onclick="UI.showDetailModal('${rel.id}', false)">
+                        <img src="${rel.cover}" alt="${this.escapeHtml(rel.title)}" class="detail-related-thumb" onerror="this.src='${getFallbackCoverSvg(rel.title, rel.type)}'"/>
+                        <h5 class="detail-related-info-title">${this.escapeHtml(rel.title)}</h5>
+                        <p class="detail-related-info-creator">${this.escapeHtml(rel.creator)}</p>
+                        <span class="detail-related-reason">${this.escapeHtml(rel.relationReason)}</span>
+                      </div>
+                    `).join('')}
+                  </div>
+                </div>
+              ` : ''}
             </div>
           </div>
         </div>
@@ -800,7 +1098,7 @@ const UI = {
     modal.classList.add('open');
   },
 
-  // ------------------ MODAL DE ADICIONAR COM CAMPOS DINÂMICOS ------------------
+  // ------------------ MODAL ADICIONAR COM CABEÇALHO/RODAPÉ FIXOS & AUTOCOMPLETE ------------------
   showAddModal(preselectedType = 'book') {
     const user = Storage.getCurrentUser();
     if (!user) {
@@ -808,74 +1106,249 @@ const UI = {
       return;
     }
 
+    this.currentModalType = preselectedType;
     const modal = document.getElementById('modal-container');
+
     modal.innerHTML = `
       <div class="modal-backdrop" onclick="UI.closeModal()">
-        <div class="modal-card modal-lg" onclick="event.stopPropagation()">
-          <div class="modal-header">
+        <div class="modal-card modal-lg modal-fixed-layout" onclick="event.stopPropagation()">
+          
+          <!-- Cabeçalho Fixo -->
+          <div class="modal-header modal-header-fixed">
             <h2 class="modal-title">＋ Adicionar à Revista Cultural</h2>
-            <button class="modal-close-btn" onclick="UI.closeModal()">✕</button>
+            <button class="modal-close-btn" onclick="UI.closeModal()" title="Fechar">✕</button>
           </div>
 
-          <form id="form-add-item" onsubmit="UI.handleSaveNewItem(event)">
-            <div style="display: flex; gap: 10px; padding: 16px 28px; background: #FAF6EE; border-bottom: 1px solid var(--border-warm);">
-              <label class="btn btn-outline btn-sm ${preselectedType === 'book' ? 'btn-secondary' : ''}" style="cursor: pointer;">
-                <input type="radio" name="mediaType" value="book" ${preselectedType === 'book' ? 'checked' : ''} onchange="UI.switchAddModalType('book')" style="display: none;"/>
-                📚 Livro
+          <!-- Seletor de Tipo (Livro, Filme, Série) -->
+          <div style="display: flex; gap: 10px; padding: 14px 28px; background: #FAF6EE; border-bottom: 1px solid var(--border-warm); flex-shrink: 0;">
+            <label class="btn btn-outline btn-sm ${preselectedType === 'book' ? 'btn-secondary' : ''}" style="cursor: pointer;">
+              <input type="radio" name="modalMediaTypeSelector" value="book" ${preselectedType === 'book' ? 'checked' : ''} onchange="UI.switchAddModalType('book')" style="display: none;"/>
+              📚 Livro
+            </label>
+            <label class="btn btn-outline btn-sm ${preselectedType === 'movie' ? 'btn-secondary' : ''}" style="cursor: pointer;">
+              <input type="radio" name="modalMediaTypeSelector" value="movie" ${preselectedType === 'movie' ? 'checked' : ''} onchange="UI.switchAddModalType('movie')" style="display: none;"/>
+              🎬 Filme
+            </label>
+            <label class="btn btn-outline btn-sm ${preselectedType === 'series' ? 'btn-secondary' : ''}" style="cursor: pointer;">
+              <input type="radio" name="modalMediaTypeSelector" value="series" ${preselectedType === 'series' ? 'checked' : ''} onchange="UI.switchAddModalType('series')" style="display: none;"/>
+              📺 Série
+            </label>
+          </div>
+
+          <!-- Área com Scroll Próprio -->
+          <div class="modal-body-scroll">
+            
+            <!-- Barra de Busca Rápida Automática -->
+            <div class="autofill-search-section">
+              <label style="display: block; font-size: 12.5px; font-weight: 700; color: var(--primary-navy); margin-bottom: 6px;">
+                ⚡ Preenchimento Automático Inteligente
               </label>
-              <label class="btn btn-outline btn-sm ${preselectedType === 'movie' ? 'btn-secondary' : ''}" style="cursor: pointer;">
-                <input type="radio" name="mediaType" value="movie" ${preselectedType === 'movie' ? 'checked' : ''} onchange="UI.switchAddModalType('movie')" style="display: none;"/>
-                🎬 Filme
-              </label>
-              <label class="btn btn-outline btn-sm ${preselectedType === 'series' ? 'btn-secondary' : ''}" style="cursor: pointer;">
-                <input type="radio" name="mediaType" value="series" ${preselectedType === 'series' ? 'checked' : ''} onchange="UI.switchAddModalType('series')" style="display: none;"/>
-                📺 Série
-              </label>
+              <div class="autofill-search-wrapper">
+                <span class="autofill-search-icon">🔍</span>
+                <input
+                  type="text"
+                  id="autofill-search-input"
+                  class="autofill-search-input"
+                  placeholder="Digite o título (ex: O Hobbit, Interestelar, Breaking Bad)..."
+                  autocomplete="off"
+                  oninput="UI.handleAutofillSearch(this.value)"
+                />
+                <span id="autofill-search-spinner" class="autofill-spinner" style="display: none;">⏳</span>
+              </div>
+              <div id="autofill-results-container"></div>
+              <div id="autofill-feedback-container"></div>
             </div>
 
-            <div class="modal-form-grid" id="modal-dynamic-fields">
-              ${this.getDynamicFormFields(preselectedType)}
-            </div>
+            <!-- Formulário Principal -->
+            <form id="form-add-item" onsubmit="UI.handleSaveNewItem(event)">
+              <input type="hidden" name="mediaType" id="add-modal-media-type" value="${preselectedType}"/>
 
-            <div class="form-review-section">
-              <div class="form-group">
-                <label>Sua Avaliação (1 a 5 estrelas)</label>
-                <div style="display: flex; gap: 6px;" id="new-item-rating-stars">
-                  ${[1, 2, 3, 4, 5].map(s => `
-                    <span class="interactive-star filled" data-val="${s}" onclick="UI.setFormRating(${s})">★</span>
-                  `).join('')}
+              <div class="modal-form-grid" id="modal-dynamic-fields">
+                ${this.getDynamicFormFields(preselectedType)}
+              </div>
+
+              <!-- Seção de Avaliação e Resenha Ampla (0/1000 caracteres) -->
+              <div class="form-review-section">
+                <div class="form-group">
+                  <label>Sua Avaliação (1 a 5 estrelas)</label>
+                  <div style="display: flex; gap: 6px;" id="new-item-rating-stars">
+                    ${[1, 2, 3, 4, 5].map(s => `
+                      <span class="interactive-star filled" data-val="${s}" onclick="UI.setFormRating(${s})">★</span>
+                    `).join('')}
+                  </div>
+                  <input type="hidden" name="rating" id="new-item-rating-val" value="5"/>
                 </div>
-                <input type="hidden" name="rating" id="new-item-rating-val" value="5"/>
-              </div>
 
-              <div class="form-group">
-                <label>Comentário ou Resenha Cultural</label>
-                <textarea name="review" class="form-input form-textarea" rows="3" placeholder="O que você achou desta obra? Suas impressões alimentam suas recomendações..."></textarea>
-              </div>
+                <div class="form-group">
+                  <label>O que você achou? (Comentário ou Recomendação Cultural)</label>
+                  <textarea
+                    name="review"
+                    id="add-item-review-textarea"
+                    class="form-textarea-expanded"
+                    maxlength="1000"
+                    placeholder="Escreva suas impressões, sentimentos e reflexões sobre a obra... Suas resenhas alimentam o motor de recomendações."
+                    oninput="UI.updateCharCounter(this, 'add-item-review-counter', 1000)"
+                  ></textarea>
+                  <div class="review-counter-row">
+                    <span>Espaço confortável para recomendações ricas e sinceras.</span>
+                    <span id="add-item-review-counter" class="review-counter-badge">0/1000</span>
+                  </div>
+                </div>
 
-              <div style="display: flex; align-items: center; gap: 8px; margin: 10px 0;">
-                <input type="checkbox" id="add-item-fav-check" name="isFavorite" value="true" checked style="accent-color: var(--accent-orange); width: 18px; height: 18px;"/>
-                <label for="add-item-fav-check" style="font-weight: 600; color: var(--primary-navy); cursor: pointer;">❤️ Salvar nos Favoritos</label>
+                <div style="display: flex; align-items: center; gap: 8px; margin: 12px 0;">
+                  <input type="checkbox" id="add-item-fav-check" name="isFavorite" value="true" checked style="accent-color: var(--accent-orange); width: 18px; height: 18px;"/>
+                  <label for="add-item-fav-check" style="font-weight: 600; color: var(--primary-navy); cursor: pointer;">❤️ Salvar nos Favoritos</label>
+                </div>
               </div>
-            </div>
+            </form>
+          </div>
 
-            <div class="modal-footer">
-              <button type="button" class="btn btn-outline" onclick="UI.closeModal()">Cancelar</button>
-              <button type="submit" class="btn btn-primary">Salvar Conteúdo</button>
-            </div>
-          </form>
+          <!-- Rodapé Fixo com Botões Acessíveis -->
+          <div class="modal-footer-fixed">
+            <button type="button" class="btn btn-outline" onclick="UI.closeModal()">Cancelar</button>
+            <button type="button" class="btn btn-primary" onclick="document.getElementById('form-add-item').requestSubmit()">Salvar Conteúdo</button>
+          </div>
         </div>
       </div>
     `;
+
     modal.classList.add('open');
     this.setFormRating(5);
   },
 
   switchAddModalType(type) {
+    this.currentModalType = type;
+    const hiddenType = document.getElementById('add-modal-media-type');
+    if (hiddenType) hiddenType.value = type;
+
     const fieldsContainer = document.getElementById('modal-dynamic-fields');
     if (fieldsContainer) {
       fieldsContainer.innerHTML = this.getDynamicFormFields(type);
     }
+
+    // Limpar busca anterior
+    const searchInput = document.getElementById('autofill-search-input');
+    if (searchInput) searchInput.value = '';
+    const resultsContainer = document.getElementById('autofill-results-container');
+    if (resultsContainer) resultsContainer.innerHTML = '';
+    const feedbackContainer = document.getElementById('autofill-feedback-container');
+    if (feedbackContainer) feedbackContainer.innerHTML = '';
+  },
+
+  // Busca rápida com debounce no cadastro de conteúdo
+  handleAutofillSearch(query) {
+    clearTimeout(this._autofillDebounceTimer);
+    const resultsContainer = document.getElementById('autofill-results-container');
+    const feedbackContainer = document.getElementById('autofill-feedback-container');
+    const spinner = document.getElementById('autofill-search-spinner');
+
+    if (!query || query.trim().length < 2) {
+      if (resultsContainer) resultsContainer.innerHTML = '';
+      if (feedbackContainer) feedbackContainer.innerHTML = '';
+      if (spinner) spinner.style.display = 'none';
+      return;
+    }
+
+    if (spinner) spinner.style.display = 'inline-block';
+
+    this._autofillDebounceTimer = setTimeout(async () => {
+      try {
+        let results = [];
+        if (this.currentModalType === 'book') {
+          results = await SearchService.searchBooksOpenLibrary(query);
+        } else if (this.currentModalType === 'movie') {
+          results = await SearchService.searchMoviesItunes(query);
+        } else {
+          results = await SearchService.searchSeriesTVMaze(query);
+        }
+
+        if (spinner) spinner.style.display = 'none';
+
+        if (results && results.length > 0) {
+          if (feedbackContainer) feedbackContainer.innerHTML = '';
+          if (resultsContainer) {
+            resultsContainer.innerHTML = `
+              <div class="autocomplete-dropdown">
+                <div class="autocomplete-dropdown-header">RESULTADOS ENCONTRADOS (Clique para preencher)</div>
+                ${results.map((r, idx) => `
+                  <div class="autocomplete-item" onclick="UI.applyAutofillItem(${idx})">
+                    <img src="${r.cover}" alt="${this.escapeHtml(r.title)}" class="autocomplete-thumb" onerror="this.src='${getFallbackCoverSvg(r.title, r.type)}'"/>
+                    <div class="autocomplete-info">
+                      <div class="autocomplete-title">${this.escapeHtml(r.title)}</div>
+                      <div class="autocomplete-meta">${this.escapeHtml(r.creator)} • ${r.year || ''} • ${this.escapeHtml(r.genre)}</div>
+                    </div>
+                    <button type="button" class="autocomplete-select-btn">Preencher</button>
+                  </div>
+                `).join('')}
+              </div>
+            `;
+            // Armazena temporariamente os resultados para acesso pelo índice
+            this._lastAutofillResults = results;
+          }
+        } else {
+          if (resultsContainer) resultsContainer.innerHTML = '';
+          if (feedbackContainer) {
+            feedbackContainer.innerHTML = `
+              <div class="autofill-banner-empty">
+                Não encontramos esse conteúdo. Você pode preencher os dados manualmente abaixo.
+              </div>
+            `;
+          }
+        }
+      } catch (err) {
+        if (spinner) spinner.style.display = 'none';
+        console.warn('Erro no preenchimento automático', err);
+      }
+    }, 350);
+  },
+
+  applyAutofillItem(idx) {
+    if (!this._lastAutofillResults || !this._lastAutofillResults[idx]) return;
+    const item = this._lastAutofillResults[idx];
+    const form = document.getElementById('form-add-item');
+    if (!form) return;
+
+    if (form.title) form.title.value = item.title || '';
+    if (form.creator) form.creator.value = item.creator || '';
+    if (form.genre) form.genre.value = item.genre || '';
+    if (form.cover) form.cover.value = item.cover || '';
+    if (form.year) form.year.value = item.year || new Date().getFullYear();
+
+    if (this.currentModalType === 'book') {
+      if (form.pages) form.pages.value = item.pages || 320;
+      if (form.isbn) form.isbn.value = item.isbn || '';
+      if (form.publisher) form.publisher.value = item.publisher || '';
+    } else if (this.currentModalType === 'movie') {
+      if (form.duration) form.duration.value = item.duration || 120;
+    } else if (this.currentModalType === 'series') {
+      if (form.seasons) form.seasons.value = item.seasons || 1;
+      if (form.episodes) form.episodes.value = item.episodes || 10;
+    }
+
+    // Fechar dropdown e exibir banner de sucesso
+    const resultsContainer = document.getElementById('autofill-results-container');
+    if (resultsContainer) resultsContainer.innerHTML = '';
+
+    const feedbackContainer = document.getElementById('autofill-feedback-container');
+    if (feedbackContainer) {
+      feedbackContainer.innerHTML = `
+        <div class="autofill-banner-success">
+          ✓ Informações encontradas automaticamente. Você pode editá-las antes de salvar.
+        </div>
+      `;
+    }
+
+    this.showToast('✓ Dados e capa preenchidos com sucesso!', 'success');
+  },
+
+  updateCharCounter(textarea, counterId, limit) {
+    const counter = document.getElementById(counterId);
+    if (!counter || !textarea) return;
+    const len = textarea.value.length;
+    counter.textContent = `${len}/${limit}`;
+
+    counter.classList.toggle('limit-near', len >= limit * 0.85 && len < limit);
+    counter.classList.toggle('limit-reached', len >= limit);
   },
 
   getDynamicFormFields(type, item = null) {
@@ -883,25 +1356,37 @@ const UI = {
       return `
         <div class="form-group">
           <label>Título do Livro *</label>
-          <input type="text" name="title" required class="form-input" placeholder="Ex: 1984" value="${item ? this.escapeHtml(item.title) : ''}"/>
+          <input type="text" name="title" required class="form-input" placeholder="Ex: O Hobbit" value="${item ? this.escapeHtml(item.title) : ''}"/>
         </div>
         <div class="form-group">
-          <label>Autor *</label>
-          <input type="text" name="creator" required class="form-input" placeholder="Ex: George Orwell" value="${item ? this.escapeHtml(item.creator) : ''}"/>
+          <label>Autor(a) *</label>
+          <input type="text" name="creator" required class="form-input" placeholder="Ex: J.R.R. Tolkien" value="${item ? this.escapeHtml(item.creator) : ''}"/>
         </div>
         <div class="form-group">
           <label>Número de Páginas *</label>
-          <input type="number" name="pages" min="1" required class="form-input" placeholder="Ex: 336" value="${item ? item.pages : '320'}"/>
+          <input type="number" name="pages" min="1" required class="form-input" placeholder="Ex: 320" value="${item ? item.pages : '320'}"/>
         </div>
         <div class="form-group">
           <label>Gênero Literário *</label>
-          <input type="text" name="genre" required class="form-input" placeholder="Ex: Ficção Científica, Clássico" value="${item ? this.escapeHtml(item.genre) : 'Ficção Científica'}"/>
+          <input type="text" name="genre" required class="form-input" placeholder="Ex: Fantasia, Ficção Científica" value="${item ? this.escapeHtml(item.genre) : 'Literatura'}"/>
+        </div>
+        <div class="form-group">
+          <label>Ano de Publicação</label>
+          <input type="number" name="year" class="form-input" placeholder="Ex: 1937" value="${item ? item.year : new Date().getFullYear()}"/>
+        </div>
+        <div class="form-group">
+          <label>ISBN (Opcional)</label>
+          <input type="text" name="isbn" class="form-input" placeholder="Ex: 9780547928227" value="${item && item.isbn ? this.escapeHtml(item.isbn) : ''}"/>
+        </div>
+        <div class="form-group">
+          <label>Editora (Opcional)</label>
+          <input type="text" name="publisher" class="form-input" placeholder="Ex: HarperCollins" value="${item && item.publisher ? this.escapeHtml(item.publisher) : ''}"/>
         </div>
         <div class="form-group">
           <label>URL da Capa Real (Opcional)</label>
           <input type="url" name="cover" class="form-input" placeholder="https://covers.openlibrary.org/..." value="${item ? item.cover : ''}"/>
         </div>
-        <div class="form-group">
+        <div class="form-group" style="grid-column: 1 / -1;">
           <label>Status de Leitura</label>
           <select name="status" class="form-input">
             <option value="read" ${item && item.status === 'read' ? 'selected' : ''}>Lido</option>
@@ -917,22 +1402,26 @@ const UI = {
           <input type="text" name="title" required class="form-input" placeholder="Ex: Interestelar" value="${item ? this.escapeHtml(item.title) : ''}"/>
         </div>
         <div class="form-group">
-          <label>Diretor *</label>
+          <label>Diretor(a) *</label>
           <input type="text" name="creator" required class="form-input" placeholder="Ex: Christopher Nolan" value="${item ? this.escapeHtml(item.creator) : ''}"/>
         </div>
         <div class="form-group">
-          <label>Duração (minutos) *</label>
+          <label>Duração (em minutos) *</label>
           <input type="number" name="duration" min="1" required class="form-input" placeholder="Ex: 169" value="${item ? item.duration : '120'}"/>
         </div>
         <div class="form-group">
           <label>Gênero Cinematográfico *</label>
-          <input type="text" name="genre" required class="form-input" placeholder="Ex: Ficção Científica, Drama" value="${item ? this.escapeHtml(item.genre) : 'Ficção Científica'}"/>
+          <input type="text" name="genre" required class="form-input" placeholder="Ex: Ficção Científica, Drama" value="${item ? this.escapeHtml(item.genre) : 'Cinema'}"/>
+        </div>
+        <div class="form-group">
+          <label>Ano de Lançamento</label>
+          <input type="number" name="year" class="form-input" placeholder="Ex: 2014" value="${item ? item.year : new Date().getFullYear()}"/>
         </div>
         <div class="form-group">
           <label>URL do Pôster Real (Opcional)</label>
           <input type="url" name="cover" class="form-input" placeholder="https://image.tmdb.org/..." value="${item ? item.cover : ''}"/>
         </div>
-        <div class="form-group">
+        <div class="form-group" style="grid-column: 1 / -1;">
           <label>Status</label>
           <select name="status" class="form-input">
             <option value="watched" ${item && item.status === 'watched' ? 'selected' : ''}>Assistido</option>
@@ -960,9 +1449,17 @@ const UI = {
         </div>
         <div class="form-group">
           <label>Gênero *</label>
-          <input type="text" name="genre" required class="form-input" placeholder="Ex: Drama, Crime" value="${item ? this.escapeHtml(item.genre) : 'Drama'}"/>
+          <input type="text" name="genre" required class="form-input" placeholder="Ex: Drama, Crime, Suspense" value="${item ? this.escapeHtml(item.genre) : 'Drama'}"/>
         </div>
         <div class="form-group">
+          <label>Ano de Estreia</label>
+          <input type="number" name="year" class="form-input" placeholder="Ex: 2008" value="${item ? item.year : new Date().getFullYear()}"/>
+        </div>
+        <div class="form-group" style="grid-column: 1 / -1;">
+          <label>URL do Pôster Real (Opcional)</label>
+          <input type="url" name="cover" class="form-input" placeholder="https://image.tmdb.org/..." value="${item ? item.cover : ''}"/>
+        </div>
+        <div class="form-group" style="grid-column: 1 / -1;">
           <label>Status da Série</label>
           <select name="status" class="form-input">
             <option value="completed" ${item && item.status === 'completed' ? 'selected' : ''}>Finalizada</option>
@@ -985,48 +1482,62 @@ const UI = {
     const modal = document.getElementById('modal-container');
     modal.innerHTML = `
       <div class="modal-backdrop" onclick="UI.closeModal()">
-        <div class="modal-card modal-lg" onclick="event.stopPropagation()">
-          <div class="modal-header">
+        <div class="modal-card modal-lg modal-fixed-layout" onclick="event.stopPropagation()">
+          <div class="modal-header modal-header-fixed">
             <h2 class="modal-title">✏️ Editar ${item.type === 'book' ? 'Livro' : item.type === 'movie' ? 'Filme' : 'Série'}</h2>
-            <button class="modal-close-btn" onclick="UI.closeModal()">✕</button>
+            <button class="modal-close-btn" onclick="UI.closeModal()" title="Fechar">✕</button>
           </div>
 
-          <form onsubmit="UI.handleUpdateItem(event, '${item.id}', '${item.type}')">
-            <div class="modal-form-grid">
-              ${this.getDynamicFormFields(item.type, item)}
-            </div>
+          <div class="modal-body-scroll">
+            <form id="form-edit-item" onsubmit="UI.handleUpdateItem(event, '${item.id}', '${item.type}')">
+              <div class="modal-form-grid">
+                ${this.getDynamicFormFields(item.type, item)}
+              </div>
 
-            <div class="form-review-section">
-              <div class="form-group">
-                <label>Sua Avaliação (1 a 5 estrelas)</label>
-                <div style="display: flex; gap: 6px;" id="new-item-rating-stars">
-                  ${[1, 2, 3, 4, 5].map(s => `
-                    <span class="interactive-star ${s <= item.rating ? 'filled' : ''}" data-val="${s}" onclick="UI.setFormRating(${s})">★</span>
-                  `).join('')}
+              <div class="form-review-section">
+                <div class="form-group">
+                  <label>Sua Avaliação (1 a 5 estrelas)</label>
+                  <div style="display: flex; gap: 6px;" id="new-item-rating-stars">
+                    ${[1, 2, 3, 4, 5].map(s => `
+                      <span class="interactive-star ${s <= item.rating ? 'filled' : ''}" data-val="${s}" onclick="UI.setFormRating(${s})">★</span>
+                    `).join('')}
+                  </div>
+                  <input type="hidden" name="rating" id="new-item-rating-val" value="${item.rating || 5}"/>
                 </div>
-                <input type="hidden" name="rating" id="new-item-rating-val" value="${item.rating || 5}"/>
-              </div>
 
-              <div class="form-group">
-                <label>Comentário ou Resenha</label>
-                <textarea name="review" class="form-input form-textarea" rows="3">${this.escapeHtml(item.review || '')}</textarea>
-              </div>
+                <div class="form-group">
+                  <label>O que você achou? (Comentário ou Resenha)</label>
+                  <textarea
+                    name="review"
+                    id="edit-item-review-textarea"
+                    class="form-textarea-expanded"
+                    maxlength="1000"
+                    oninput="UI.updateCharCounter(this, 'edit-item-review-counter', 1000)"
+                  >${this.escapeHtml(item.review || '')}</textarea>
+                  <div class="review-counter-row">
+                    <span>Edite suas anotações e reflexões culturais.</span>
+                    <span id="edit-item-review-counter" class="review-counter-badge">${(item.review || '').length}/1000</span>
+                  </div>
+                </div>
 
-              <div style="display: flex; align-items: center; gap: 8px; margin: 10px 0;">
-                <input type="checkbox" id="edit-item-fav-check" name="isFavorite" value="true" ${item.isFavorite ? 'checked' : ''} style="accent-color: var(--accent-orange); width: 18px; height: 18px;"/>
-                <label for="edit-item-fav-check" style="font-weight: 600; color: var(--primary-navy); cursor: pointer;">❤️ Salvar nos Favoritos</label>
+                <div style="display: flex; align-items: center; gap: 8px; margin: 12px 0;">
+                  <input type="checkbox" id="edit-item-fav-check" name="isFavorite" value="true" ${item.isFavorite ? 'checked' : ''} style="accent-color: var(--accent-orange); width: 18px; height: 18px;"/>
+                  <label for="edit-item-fav-check" style="font-weight: 600; color: var(--primary-navy); cursor: pointer;">❤️ Salvar nos Favoritos</label>
+                </div>
               </div>
-            </div>
+            </form>
+          </div>
 
-            <div class="modal-footer">
-              <button type="button" class="btn btn-outline" onclick="UI.closeModal()">Cancelar</button>
-              <button type="submit" class="btn btn-primary">Salvar Alterações</button>
-            </div>
-          </form>
+          <div class="modal-footer-fixed">
+            <button type="button" class="btn btn-outline" onclick="UI.closeModal()">Cancelar</button>
+            <button type="button" class="btn btn-primary" onclick="document.getElementById('form-edit-item').requestSubmit()">Salvar Alterações</button>
+          </div>
         </div>
       </div>
     `;
+
     modal.classList.add('open');
+    this.setFormRating(item.rating || 5);
   },
 
   showQuickAddModal(catalogOrItemId) {
@@ -1036,7 +1547,7 @@ const UI = {
       return;
     }
 
-    const catalog = Storage.getCatalog();
+    const catalog = Storage.getCatalog() || [];
     const item = catalog.find(i => i.id === catalogOrItemId) ||
                  this.externalSearchResults.find(i => i.id === catalogOrItemId) ||
                  Storage.getUserItems(user.id).find(i => i.id === catalogOrItemId);
@@ -1045,143 +1556,80 @@ const UI = {
     const modal = document.getElementById('modal-container');
     modal.innerHTML = `
       <div class="modal-backdrop" onclick="UI.closeModal()">
-        <div class="modal-card modal-md" onclick="event.stopPropagation()">
-          <div class="modal-header">
+        <div class="modal-card modal-md modal-fixed-layout" onclick="event.stopPropagation()">
+          <div class="modal-header modal-header-fixed">
             <h2 class="modal-title">＋ Adicionar à Minha Biblioteca</h2>
-            <button class="modal-close-btn" onclick="UI.closeModal()">✕</button>
+            <button class="modal-close-btn" onclick="UI.closeModal()" title="Fechar">✕</button>
           </div>
 
-          <form onsubmit="UI.handleConfirmQuickAdd(event, '${item.id}')">
-            <div style="display: flex; gap: 16px; padding: 18px 24px; background: #FAF6EE; border-bottom: 1px solid var(--border-warm);">
-              <img src="${item.cover}" alt="${item.title}" style="width: 55px; height: 80px; object-fit: cover; border-radius: 4px; box-shadow: var(--shadow-book);" onerror="this.src='${getFallbackCoverSvg(item.title, item.type)}'"/>
-              <div>
-                <h4 style="font-family: var(--font-serif); font-size: 17px; color: var(--primary-navy);">${this.escapeHtml(item.title)}</h4>
-                <p style="font-size: 13px; color: var(--text-muted);">${this.escapeHtml(item.creator)} • ${item.genre} (${item.year || ''})</p>
-              </div>
-            </div>
-
-            <div style="padding: 20px 24px;">
-              <div class="form-group">
-                <label>Status</label>
-                <select name="status" class="form-input">
-                  ${item.type === 'book' ? `
-                    <option value="read" selected>Lido</option>
-                    <option value="reading">Lendo Agora</option>
-                    <option value="want_to_read">Quero ler</option>
-                  ` : item.type === 'movie' ? `
-                    <option value="watched" selected>Assistido</option>
-                    <option value="want_to_watch">Quero assistir</option>
-                  ` : `
-                    <option value="completed" selected>Finalizada</option>
-                    <option value="watching">Assistindo Agora</option>
-                    <option value="want_to_watch">Quero assistir</option>
-                  `}
-                </select>
-              </div>
-
-              <div class="form-group">
-                <label>Sua Nota</label>
-                <div style="display: flex; gap: 6px;" id="new-item-rating-stars">
-                  ${[1, 2, 3, 4, 5].map(s => `
-                    <span class="interactive-star filled" data-val="${s}" onclick="UI.setFormRating(${s})">★</span>
-                  `).join('')}
+          <div class="modal-body-scroll">
+            <form id="form-quick-add" onsubmit="UI.handleConfirmQuickAdd(event, '${item.id}')">
+              <div style="display: flex; gap: 16px; padding: 18px 24px; background: #FAF6EE; border-bottom: 1px solid var(--border-warm);">
+                <img src="${item.cover}" alt="${this.escapeHtml(item.title)}" style="width: 58px; height: 84px; object-fit: cover; border-radius: 4px; box-shadow: var(--shadow-book);" onerror="this.src='${getFallbackCoverSvg(item.title, item.type)}'"/>
+                <div>
+                  <h4 style="font-family: var(--font-serif); font-size: 18px; color: var(--primary-navy);">${this.escapeHtml(item.title)}</h4>
+                  <p style="font-size: 13.5px; color: var(--text-muted); margin-top: 2px;">${this.escapeHtml(item.creator)} • ${this.escapeHtml(item.genre)} (${item.year || ''})</p>
                 </div>
-                <input type="hidden" name="rating" id="new-item-rating-val" value="5"/>
               </div>
 
-              <div class="form-group">
-                <label>Comentário</label>
-                <textarea name="review" class="form-input form-textarea" rows="2" placeholder="Sua opinião sincera..."></textarea>
-              </div>
-            </div>
+              <div style="padding: 20px 24px;">
+                <div class="form-group">
+                  <label>Status de Consumo</label>
+                  <select name="status" class="form-input">
+                    ${item.type === 'book' ? `
+                      <option value="read" selected>Lido</option>
+                      <option value="reading">Lendo Agora</option>
+                      <option value="want_to_read">Quero ler</option>
+                    ` : item.type === 'movie' ? `
+                      <option value="watched" selected>Assistido</option>
+                      <option value="want_to_watch">Quero assistir</option>
+                    ` : `
+                      <option value="completed" selected>Finalizada</option>
+                      <option value="watching">Assistindo Agora</option>
+                      <option value="want_to_watch">Quero assistir</option>
+                      <option value="paused">Pausada</option>
+                    `}
+                  </select>
+                </div>
 
-            <div class="modal-footer">
-              <button type="button" class="btn btn-outline" onclick="UI.closeModal()">Cancelar</button>
-              <button type="submit" class="btn btn-primary">Adicionar Agora</button>
-            </div>
-          </form>
+                <div class="form-group">
+                  <label>Sua Avaliação</label>
+                  <div style="display: flex; gap: 6px;" id="new-item-rating-stars">
+                    ${[1, 2, 3, 4, 5].map(s => `
+                      <span class="interactive-star filled" data-val="${s}" onclick="UI.setFormRating(${s})">★</span>
+                    `).join('')}
+                  </div>
+                  <input type="hidden" name="rating" id="new-item-rating-val" value="5"/>
+                </div>
+
+                <div class="form-group">
+                  <label>Comentário ou Resenha</label>
+                  <textarea
+                    name="review"
+                    class="form-textarea-expanded"
+                    maxlength="1000"
+                    placeholder="Sua opinião sincera..."
+                    oninput="UI.updateCharCounter(this, 'quick-add-counter', 1000)"
+                  ></textarea>
+                  <div class="review-counter-row">
+                    <span>Grave suas reflexões culturais.</span>
+                    <span id="quick-add-counter" class="review-counter-badge">0/1000</span>
+                  </div>
+                </div>
+              </div>
+            </form>
+          </div>
+
+          <div class="modal-footer-fixed">
+            <button type="button" class="btn btn-outline" onclick="UI.closeModal()">Cancelar</button>
+            <button type="button" class="btn btn-primary" onclick="document.getElementById('form-quick-add').requestSubmit()">Adicionar Agora</button>
+          </div>
         </div>
       </div>
     `;
+
     modal.classList.add('open');
     this.setFormRating(5);
-  },
-
-  // ------------------ BUSCA GLOBAL & EXTERNA ------------------
-  handleDiscoverLocalSearch(val) {
-    this.searchQuery = val;
-    this.renderDiscover(Storage.getCurrentUser());
-  },
-
-  async handleDiscoverSubmitSearch(e) {
-    e.preventDefault();
-    const query = document.getElementById('discover-search-input-field')?.value || this.searchQuery;
-    if (!query || query.trim().length < 2) return;
-
-    this.isSearchingExternal = true;
-    this.showToast(`Buscando "${query}" em acervos globais...`, 'info');
-
-    // Search OpenLibrary for books & iTunes for cinema
-    const [books, movies] = await Promise.all([
-      SearchService.searchBooksOpenLibrary(query),
-      SearchService.searchMoviesItunes(query)
-    ]);
-
-    this.externalSearchResults = [...books, ...movies];
-    this.isSearchingExternal = false;
-
-    if (this.externalSearchResults.length > 0) {
-      this.showToast(`${this.externalSearchResults.length} obras encontradas no acervo mundial! ✨`, 'success');
-    } else {
-      this.showToast('Nenhum resultado externo. Mostrando catálogo local.', 'info');
-    }
-
-    this.renderDiscover(Storage.getCurrentUser());
-  },
-
-  handleDiscoverType(type) {
-    this.selectedStatusFilter = type;
-    this.renderDiscover(Storage.getCurrentUser());
-  },
-
-  handleDiscoverGenre(genre) {
-    this.selectedGenreFilter = genre;
-    this.renderDiscover(Storage.getCurrentUser());
-  },
-
-  handleLibrarySearch(val, type) {
-    this.searchQuery = val;
-    this.renderMediaLibrary(type, Storage.getCurrentUser());
-  },
-
-  handleStatusFilter(status, type) {
-    this.selectedStatusFilter = status;
-    this.renderMediaLibrary(type, Storage.getCurrentUser());
-  },
-
-  handleGenreFilter(genre, type) {
-    this.selectedGenreFilter = genre;
-    this.renderMediaLibrary(type, Storage.getCurrentUser());
-  },
-
-  handleToggleFavorite(itemId) {
-    const user = Storage.getCurrentUser();
-    if (!user) {
-      this.showAuthModal('login');
-      return;
-    }
-    const isFav = Storage.toggleFavorite(user.id, itemId);
-    this.showToast(isFav ? 'Adicionado aos favoritos ❤️' : 'Removido dos favoritos', 'info');
-    this.navigate(this.currentView);
-  },
-
-  handleDeleteItem(itemId) {
-    if (!confirm('Deseja realmente remover esta obra da sua biblioteca?')) return;
-    const user = Storage.getCurrentUser();
-    if (!user) return;
-    Storage.deleteItem(user.id, itemId);
-    this.showToast('Obra removida com sucesso!', 'info');
-    this.navigate(this.currentView);
   },
 
   handleSaveNewItem(e) {
@@ -1199,11 +1647,13 @@ const UI = {
       creator: formData.get('creator'),
       genre: formData.get('genre'),
       cover: formData.get('cover'),
+      year: formData.get('year'),
       pages: formData.get('pages'),
       duration: formData.get('duration'),
       seasons: formData.get('seasons'),
       episodes: formData.get('episodes'),
-      year: formData.get('year'),
+      isbn: formData.get('isbn'),
+      publisher: formData.get('publisher'),
       status: formData.get('status'),
       rating: parseFloat(formData.get('rating')) || 5,
       review: formData.get('review') || '',
@@ -1233,11 +1683,13 @@ const UI = {
       creator: formData.get('creator'),
       genre: formData.get('genre'),
       cover: formData.get('cover'),
+      year: formData.get('year'),
       pages: formData.get('pages'),
       duration: formData.get('duration'),
       seasons: formData.get('seasons'),
       episodes: formData.get('episodes'),
-      year: formData.get('year'),
+      isbn: formData.get('isbn'),
+      publisher: formData.get('publisher'),
       status: formData.get('status'),
       rating: parseFloat(formData.get('rating')) || 5,
       review: formData.get('review') || '',
@@ -1259,7 +1711,7 @@ const UI = {
     const user = Storage.getCurrentUser();
     if (!user) return;
 
-    const catalog = Storage.getCatalog();
+    const catalog = Storage.getCatalog() || [];
     const catItem = catalog.find(i => i.id === catalogOrItemId) ||
                     this.externalSearchResults.find(i => i.id === catalogOrItemId) ||
                     Storage.getUserItems(user.id).find(i => i.id === catalogOrItemId);
@@ -1284,64 +1736,33 @@ const UI = {
     this.navigate(this.currentView);
   },
 
-  // ------------------ AUTH MODAL ------------------
-  showAuthModal(initialTab = 'login') {
-    const modal = document.getElementById('modal-container');
-    modal.innerHTML = `
-      <div class="modal-backdrop" onclick="UI.closeModal()">
-        <div class="modal-card modal-sm" onclick="event.stopPropagation()">
-          <div class="modal-header">
-            <h2 class="modal-title">${initialTab === 'login' ? 'Entrar no +Cultura' : 'Criar Nova Conta'}</h2>
-            <button class="modal-close-btn" onclick="UI.closeModal()">✕</button>
-          </div>
-
-          <div style="padding: 24px;">
-            ${initialTab === 'login' ? `
-              <form onsubmit="UI.handleLoginSubmit(event)">
-                <div class="form-group">
-                  <label>E-mail</label>
-                  <input type="email" name="email" required class="form-input" value="lucas@cultura.com"/>
-                </div>
-                <div class="form-group">
-                  <label>Senha</label>
-                  <input type="password" name="password" required class="form-input" value="demo"/>
-                </div>
-                <button type="submit" class="btn btn-primary w-full" style="margin-top: 8px;">Entrar na Conta</button>
-                <div style="text-align: center; margin: 16px 0; color: #8FA2B5; font-size: 12px;">OU</div>
-                <button type="button" class="btn btn-secondary w-full" onclick="UI.handleInstantDemoLogin()">
-                  🚀 Entrar como Usuário Demo (Lucas Mendes)
-                </button>
-              </form>
-            ` : `
-              <form onsubmit="UI.handleRegisterSubmit(event)">
-                <div class="form-group">
-                  <label>Nome Completo</label>
-                  <input type="text" name="name" required class="form-input" placeholder="Seu nome"/>
-                </div>
-                <div class="form-group">
-                  <label>E-mail</label>
-                  <input type="email" name="email" required class="form-input" placeholder="seu@email.com"/>
-                </div>
-                <div class="form-group">
-                  <label>Senha</label>
-                  <input type="password" name="password" required minlength="4" class="form-input" placeholder="Mínimo 4 caracteres"/>
-                </div>
-                <button type="submit" class="btn btn-primary w-full" style="margin-top: 8px;">Criar Conta Cultural</button>
-              </form>
-            `}
-          </div>
-        </div>
-      </div>
-    `;
-    modal.classList.add('open');
+  handleToggleFavorite(itemId) {
+    const user = Storage.getCurrentUser();
+    if (!user) {
+      this.showAuthModal('login');
+      return;
+    }
+    const isFav = Storage.toggleFavorite(user.id, itemId);
+    this.showToast(isFav ? 'Adicionado aos favoritos ❤️' : 'Removido dos favoritos', 'info');
+    this.navigate(this.currentView);
   },
 
+  handleDeleteItem(itemId) {
+    if (!confirm('Deseja realmente remover esta obra da sua biblioteca? Esta ação não pode ser desfeita.')) return;
+    const user = Storage.getCurrentUser();
+    if (!user) return;
+    Storage.deleteItem(user.id, itemId);
+    this.closeModal();
+    this.showToast('Obra removida com sucesso!', 'info');
+    this.navigate(this.currentView);
+  },
+
+  // ------------------ AUTENTICAÇÃO HANDLERS ------------------
   handleLoginSubmit(e) {
     e.preventDefault();
     const form = e.target;
     try {
       const user = Storage.loginUser(form.email.value, form.password.value);
-      this.closeModal();
       this.renderHeader();
       this.showToast(`Bem-vindo de volta, ${user.name}! 👋`, 'success');
       this.navigate('dashboard');
@@ -1353,9 +1774,14 @@ const UI = {
   handleRegisterSubmit(e) {
     e.preventDefault();
     const form = e.target;
+    const password = form.password.value;
+    const confirmPass = form.confirmPassword ? form.confirmPassword.value : password;
+    if (password !== confirmPass) {
+      this.showToast('As senhas digitadas não coincidem.', 'error');
+      return;
+    }
     try {
-      const user = Storage.registerUser(form.name.value, form.email.value, form.password.value);
-      this.closeModal();
+      const user = Storage.registerUser(form.name.value, form.email.value, password);
       this.renderHeader();
       this.showToast(`Bem-vindo ao +Cultura, ${user.name}! 🎉`, 'success');
       this.navigate('dashboard');
@@ -1365,56 +1791,215 @@ const UI = {
   },
 
   handleInstantDemoLogin() {
-    Storage.seedDemoUser();
-    const demo = Storage.getCurrentUser();
-    this.closeModal();
+    const demo = Storage.startDemoSession();
+    if (!demo) {
+      this.showToast('Não foi possível carregar a conta de demonstração.', 'error');
+      return;
+    }
     this.renderHeader();
-    this.showToast(`Conectado como ${demo.name} (Demo oficial)! 🚀`, 'success');
+    this.showToast('🎮 Você está no Modo Demonstração do +Cultura.', 'info');
     this.navigate('dashboard');
   },
 
   handleLogout() {
     Storage.logoutUser();
     this.renderHeader();
-    this.showToast('Você saiu da sua conta.', 'info');
-    this.navigate('dashboard');
+    this.showToast('Você saiu da sua conta com segurança.', 'info');
+    // NUNCA re-entrar na demo automaticamente após logout!
+    this.navigate('auth');
   },
 
-  showEditProfileModal() {
-    const user = Storage.getCurrentUser();
-    if (!user) return;
+  showAuthModal(initialTab = 'login') {
+    this.renderAuth(initialTab);
+  },
 
+  showRecoverPasswordModal() {
     const modal = document.getElementById('modal-container');
     modal.innerHTML = `
       <div class="modal-backdrop" onclick="UI.closeModal()">
-        <div class="modal-card modal-md" onclick="event.stopPropagation()">
-          <div class="modal-header">
-            <h2 class="modal-title">✏️ Editar Perfil Cultural</h2>
-            <button class="modal-close-btn" onclick="UI.closeModal()">✕</button>
+        <div class="modal-card modal-sm modal-fixed-layout" onclick="event.stopPropagation()">
+          <div class="modal-header modal-header-fixed">
+            <h2 class="modal-title">🔑 Recuperar Senha</h2>
+            <button class="modal-close-btn" onclick="UI.closeModal()" title="Fechar">✕</button>
           </div>
-
-          <form onsubmit="UI.handleUpdateProfileSubmit(event)" style="padding: 24px;">
-            <div class="form-group">
-              <label>Nome Completo</label>
-              <input type="text" name="name" required class="form-input" value="${this.escapeHtml(user.name)}"/>
-            </div>
-            <div class="form-group">
-              <label>Biografia / Apresentação</label>
-              <textarea name="bio" class="form-input form-textarea" rows="3">${this.escapeHtml(user.bio || '')}</textarea>
-            </div>
-            <div class="form-group">
-              <label>Foto de Perfil (URL)</label>
-              <input type="url" name="avatar" class="form-input" value="${this.escapeHtml(user.avatar || '')}"/>
-            </div>
-            <div class="modal-footer" style="padding: 16px 0 0 0; background: transparent;">
-              <button type="button" class="btn btn-outline" onclick="UI.closeModal()">Cancelar</button>
-              <button type="submit" class="btn btn-primary">Salvar Perfil</button>
-            </div>
-          </form>
+          <div class="modal-body-scroll" style="padding: 24px;">
+            <p style="color: var(--text-muted); margin-bottom: 16px; font-size: 14px;">
+              Informe seu e-mail e defina sua nova senha de acesso.
+            </p>
+            <form onsubmit="UI.handleRecoverPasswordSubmit(event)">
+              <div class="form-group">
+                <label>E-mail cadastrado</label>
+                <input type="email" name="email" required class="form-input" placeholder="seu@email.com"/>
+              </div>
+              <div class="form-group">
+                <label>Nova senha</label>
+                <input type="password" name="newPassword" required minlength="4" class="form-input" placeholder="Mínimo 4 caracteres"/>
+              </div>
+              <div class="form-group">
+                <label>Confirmar nova senha</label>
+                <input type="password" name="confirmPassword" required minlength="4" class="form-input" placeholder="Repita a nova senha"/>
+              </div>
+              <button type="submit" class="btn btn-primary w-full" style="margin-top: 10px;">Redefinir Senha</button>
+            </form>
+          </div>
         </div>
       </div>
     `;
     modal.classList.add('open');
+  },
+
+  handleRecoverPasswordSubmit(e) {
+    e.preventDefault();
+    const form = e.target;
+    if (form.newPassword.value !== form.confirmPassword.value) {
+      this.showToast('As senhas não coincidem.', 'error');
+      return;
+    }
+    try {
+      Storage.recoverPassword(form.email.value, form.newPassword.value);
+      this.closeModal();
+      this.showToast('Senha redefinida com sucesso! Faça login com sua nova senha.', 'success');
+    } catch (err) {
+      this.showToast(err.message, 'error');
+    }
+  },
+
+  // ------------------ MODAL EDITAR PERFIL & SELETOR DE AVATARES ------------------
+  showEditProfileModal() {
+    const user = Storage.getCurrentUser();
+    if (!user) return;
+
+    this.selectedAvatarUrl = user.avatar || (EDITORIAL_AVATARS && EDITORIAL_AVATARS[0] ? EDITORIAL_AVATARS[0].url : '');
+    const modal = document.getElementById('modal-container');
+
+    modal.innerHTML = `
+      <div class="modal-backdrop" onclick="UI.closeModal()">
+        <div class="modal-card modal-md modal-fixed-layout" onclick="event.stopPropagation()">
+          <div class="modal-header modal-header-fixed">
+            <h2 class="modal-title">✏️ Personalizar Perfil & Avatar</h2>
+            <button class="modal-close-btn" onclick="UI.closeModal()" title="Fechar">✕</button>
+          </div>
+
+          <div class="modal-body-scroll">
+            <form id="form-edit-profile" onsubmit="UI.handleUpdateProfileSubmit(event)" style="padding: 24px;">
+              <div class="form-group">
+                <label>Nome Completo</label>
+                <input type="text" name="name" required class="form-input" value="${this.escapeHtml(user.name)}"/>
+              </div>
+
+              <div class="form-group">
+                <label>Biografia / Apresentação Cultural</label>
+                <textarea name="bio" class="form-input form-textarea" rows="3" placeholder="Compartilhe seus gostos literários e cinematográficos...">${this.escapeHtml(user.bio || '')}</textarea>
+              </div>
+
+              <!-- SELETOR DE AVATAR EDITORIAL COM 16 OPÇÕES -->
+              <div class="avatar-selection-container">
+                <label style="display: block; font-weight: 700; color: var(--primary-navy); margin-bottom: 8px;">
+                  Escolha seu Avatar Editorial
+                </label>
+
+                <div class="avatar-tabs">
+                  <button type="button" class="avatar-tab-btn active" id="tab-btn-presets" onclick="UI.switchAvatarTab('presets')">
+                    🎨 Avatares Prontos (16 opções)
+                  </button>
+                  <button type="button" class="avatar-tab-btn" id="tab-btn-photo" onclick="UI.switchAvatarTab('photo')">
+                    🖼️ Usar Minha Foto
+                  </button>
+                  <button type="button" class="avatar-tab-btn" id="tab-btn-default" onclick="UI.switchAvatarTab('default')">
+                    👤 Padrão
+                  </button>
+                </div>
+
+                <!-- Painel de Avatares Prontos -->
+                <div id="avatar-panel-presets">
+                  <div class="avatar-grid">
+                    ${(EDITORIAL_AVATARS || []).map(av => `
+                      <div
+                        class="avatar-grid-item ${this.selectedAvatarUrl === av.url ? 'selected' : ''}"
+                        onclick="UI.selectPresetAvatar('${encodeURIComponent(av.url)}', this)"
+                        title="${av.name}"
+                      >
+                        <img src="${av.url}" alt="${av.name}" class="avatar-grid-thumb"/>
+                        <span class="avatar-grid-label">${av.name}</span>
+                      </div>
+                    `).join('')}
+                  </div>
+                </div>
+
+                <!-- Painel de Foto Própria -->
+                <div id="avatar-panel-photo" style="display: none; padding: 10px 0;">
+                  <label style="font-size: 13px; color: var(--text-muted);">Cole a URL da sua foto ou imagem:</label>
+                  <input
+                    type="url"
+                    id="profile-custom-photo-url"
+                    class="form-input"
+                    style="margin-top: 6px;"
+                    placeholder="https://exemplo.com/sua-foto.jpg"
+                    value="${this.selectedAvatarUrl.startsWith('data:') ? '' : this.escapeHtml(this.selectedAvatarUrl)}"
+                    oninput="UI.handleCustomPhotoInput(this.value)"
+                  />
+                  <div style="margin-top: 12px; display: flex; align-items: center; gap: 12px;">
+                    <img id="custom-photo-preview" src="${this.selectedAvatarUrl}" style="width: 50px; height: 50px; border-radius: 50%; object-fit: cover; border: 2px solid var(--primary-navy);" onerror="this.src='${EDITORIAL_AVATARS ? EDITORIAL_AVATARS[0].url : ''}'"/>
+                    <span style="font-size: 12px; color: var(--text-muted);">Prévia da foto de perfil</span>
+                  </div>
+                </div>
+
+                <input type="hidden" name="avatar" id="profile-avatar-hidden-input" value="${this.escapeHtml(this.selectedAvatarUrl)}"/>
+              </div>
+            </form>
+          </div>
+
+          <div class="modal-footer-fixed">
+            <button type="button" class="btn btn-outline" onclick="UI.closeModal()">Cancelar</button>
+            <button type="button" class="btn btn-primary" onclick="document.getElementById('form-edit-profile').requestSubmit()">Salvar Perfil</button>
+          </div>
+        </div>
+      </div>
+    `;
+
+    modal.classList.add('open');
+  },
+
+  switchAvatarTab(tab) {
+    document.querySelectorAll('.avatar-tab-btn').forEach(btn => btn.classList.remove('active'));
+    const presetsPanel = document.getElementById('avatar-panel-presets');
+    const photoPanel = document.getElementById('avatar-panel-photo');
+    const hiddenInput = document.getElementById('profile-avatar-hidden-input');
+
+    if (tab === 'presets') {
+      document.getElementById('tab-btn-presets')?.classList.add('active');
+      if (presetsPanel) presetsPanel.style.display = 'block';
+      if (photoPanel) photoPanel.style.display = 'none';
+    } else if (tab === 'photo') {
+      document.getElementById('tab-btn-photo')?.classList.add('active');
+      if (presetsPanel) presetsPanel.style.display = 'none';
+      if (photoPanel) photoPanel.style.display = 'block';
+    } else if (tab === 'default') {
+      document.getElementById('tab-btn-default')?.classList.add('active');
+      const defaultUrl = EDITORIAL_AVATARS && EDITORIAL_AVATARS[0] ? EDITORIAL_AVATARS[0].url : '';
+      this.selectedAvatarUrl = defaultUrl;
+      if (hiddenInput) hiddenInput.value = defaultUrl;
+      this.showToast('Avatar padrão selecionado.', 'info');
+    }
+  },
+
+  selectPresetAvatar(encodedUrl, element) {
+    const url = decodeURIComponent(encodedUrl);
+    this.selectedAvatarUrl = url;
+    const hiddenInput = document.getElementById('profile-avatar-hidden-input');
+    if (hiddenInput) hiddenInput.value = url;
+
+    document.querySelectorAll('.avatar-grid-item').forEach(el => el.classList.remove('selected'));
+    if (element) element.classList.add('selected');
+  },
+
+  handleCustomPhotoInput(url) {
+    if (!url) return;
+    this.selectedAvatarUrl = url;
+    const hiddenInput = document.getElementById('profile-avatar-hidden-input');
+    if (hiddenInput) hiddenInput.value = url;
+    const preview = document.getElementById('custom-photo-preview');
+    if (preview) preview.src = url;
   },
 
   handleUpdateProfileSubmit(e) {
@@ -1426,11 +2011,11 @@ const UI = {
       Storage.updateUserProfile(user.id, {
         name: form.name.value,
         bio: form.bio.value,
-        avatar: form.avatar.value
+        avatar: form.avatar.value || this.selectedAvatarUrl
       });
       this.closeModal();
       this.renderHeader();
-      this.showToast('Perfil atualizado com sucesso!', 'success');
+      this.showToast('Perfil e avatar atualizados com sucesso! ✨', 'success');
       this.navigate('profile');
     } catch (err) {
       this.showToast(err.message, 'error');

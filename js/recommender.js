@@ -1,77 +1,98 @@
-// Smart Recommendation Engine for +Cultura
-// Learns continuously from user ratings, reviews, genres, creators, length, and negative feedback
+// Smart Multi-Level Recommendation Engine for +Cultura
+// Structured in 3 intelligence levels: Direct Signals, Consumption Patterns & Future Extensibility
 
 const Recommender = {
-  // Main method to compute personalized recommendations
+  // Keyword dictionary to identify emotional/thematic preferences from reviews
+  keywordMap: {
+    'viagem no tempo': 'viagem no tempo',
+    'temporal': 'viagem no tempo',
+    'paradoxo': 'viagem no tempo',
+    'espaço': 'espaço',
+    'universo': 'espaço',
+    'planeta': 'espaço',
+    'complexo': 'complexo',
+    'reviravolta': 'reviravoltas',
+    'final surpreendente': 'reviravoltas',
+    'filosófico': 'filosófico',
+    'filosofia': 'filosófico',
+    'distopia': 'distopia',
+    'totalitário': 'distopia',
+    'máfia': 'máfia',
+    'crime': 'máfia',
+    'investigação': 'investigação',
+    'detetive': 'investigação',
+    'épico': 'épico',
+    'fantasia': 'fantasia',
+    'magia': 'magia',
+    'emocionante': 'emocionante',
+    'sensível': 'emocionante',
+    'psicológico': 'psicológico',
+    'mente': 'psicológico'
+  },
+
+  // Main method to compute personalized recommendations across Levels 1, 2, and 3
   getPersonalizedRecommendations(userId) {
     const user = Storage.getCurrentUser();
-    const userItems = Storage.getUserItems(userId);
-    const catalog = Storage.getCatalog();
+    const userItems = Storage.getUserItems(userId) || [];
+    const catalog = Storage.getCatalog() || [];
 
-    // Set of item titles or IDs user has already consumed
+    // Set of titles user already has in library
     const consumedTitles = new Set(
-      userItems
-        .filter(item => ['read', 'watched', 'completed'].includes(item.status) || item.rating > 0)
-        .map(item => item.title.toLowerCase().trim())
+      userItems.map(item => (item.title || '').toLowerCase().trim())
     );
 
-    // Profile preferences & signals
+    // ==========================================
+    // NÍVEL 1 & NÍVEL 2: EXTRAÇÃO DE PERFIL E SINAIS
+    // ==========================================
     const genreWeights = {};
+    const genreCounts = {};
     const creatorWeights = {};
     const tagWeights = {};
     const negativeGenres = new Set();
     const negativeCreators = new Set();
-    const userPositiveAnchors = [];
+    
+    // High affinity anchors (rated 4-5 or favorited)
+    const positiveAnchors = [];
 
-    // Factor in profile favorite genres as base baseline
+    // Base profile genres (Nível 1)
     if (user && Array.isArray(user.favoriteGenres)) {
       user.favoriteGenres.forEach(genre => {
-        genreWeights[genre] = (genreWeights[genre] || 0) + 12;
+        genreWeights[genre] = (genreWeights[genre] || 0) + 14;
       });
     }
 
-    // Book pages & movie durations preferences
+    // Metrics for consumption patterns (Nível 2)
     let bookPagesSum = 0;
     let highRatedBooksCount = 0;
     let movieDurationSum = 0;
     let highRatedMoviesCount = 0;
+    let completedItemsCount = 0;
 
-    // Sentiment keywords to extract from comments
-    const keywordMap = {
-      'viagem no tempo': 'viagem no tempo',
-      'temporal': 'viagem no tempo',
-      'paradoxo': 'viagem no tempo',
-      'espaço': 'espaço',
-      'universo': 'espaço',
-      'planeta': 'espaço',
-      'complexo': 'complexo',
-      'reviravolta': 'reviravoltas',
-      'final surpreendente': 'reviravoltas',
-      'filosófico': 'filosófico',
-      'filosofia': 'filosófico',
-      'distopia': 'distopia',
-      'totalitário': 'distopia',
-      'máfia': 'máfia',
-      'crime': 'máfia',
-      'investigação': 'investigação',
-      'detetive': 'investigação',
-      'épico': 'épico',
-      'fantasia': 'fantasia',
-      'magia': 'magia',
-      'emocionante': 'emocionante',
-      'choro': 'emocionante',
-      'sensível': 'emocionante',
-      'psicológico': 'psicológico',
-      'mente': 'psicológico'
-    };
-
-    // Analyze each user item
     userItems.forEach(item => {
-      const rating = item.rating || 0;
+      const rating = parseFloat(item.rating) || 0;
       const isFav = !!item.isFavorite;
+      const isCompleted = ['read', 'watched', 'completed'].includes(item.status);
 
-      // Extract length stats for positive items
+      if (isCompleted) completedItemsCount++;
+
+      // Track genre consumption count (Nível 2)
+      if (item.genre) {
+        genreCounts[item.genre] = (genreCounts[item.genre] || 0) + 1;
+      }
+
+      // Weight based on explicit rating and favorite status (Nível 1)
+      let weight = 0;
+      if (rating === 5) weight = 22;
+      else if (rating === 4) weight = 14;
+      else if (rating === 3) weight = 4;
+      else if (rating === 2) weight = -15; // Negative feedback
+      else if (rating === 1) weight = -30; // Strong negative feedback
+      else if (isCompleted) weight = 8;
+
+      if (isFav) weight += 12; // Extra boost for favorites
+
       if (rating >= 4 || isFav) {
+        positiveAnchors.push(item);
         if (item.type === 'book' && item.pages > 0) {
           bookPagesSum += item.pages;
           highRatedBooksCount++;
@@ -80,21 +101,7 @@ const Recommender = {
           movieDurationSum += item.duration;
           highRatedMoviesCount++;
         }
-        userPositiveAnchors.push(item);
       }
-
-      // Weight multiplier based on rating
-      let weight = 0;
-      if (rating === 5) weight = 20;
-      else if (rating === 4) weight = 12;
-      else if (rating === 3) weight = 3;
-      else if (rating === 2) weight = -15; // Negative feedback penalty
-      else if (rating === 1) weight = -25; // Severe penalty
-      else if (item.status === 'read' || item.status === 'watched' || item.status === 'completed') {
-        weight = 8; // Consumed without explicit rating
-      }
-
-      if (isFav) weight += 10; // Extra boost for marked favorites
 
       // Record negative signals
       if (rating > 0 && rating <= 2) {
@@ -102,7 +109,7 @@ const Recommender = {
         if (item.creator) negativeCreators.add(item.creator.toLowerCase().trim());
       }
 
-      // Genre weights
+      // Genre weights (Nível 1 & 2)
       if (item.genre) {
         genreWeights[item.genre] = (genreWeights[item.genre] || 0) + weight;
       }
@@ -112,121 +119,135 @@ const Recommender = {
         });
       }
 
-      // Creator weights (director, author, creator)
-      if (item.creator) {
+      // Creator weights (author, director, creator)
+      if (item.creator && item.creator !== 'Desconhecido') {
         const creatorKey = item.creator.toLowerCase().trim();
-        creatorWeights[creatorKey] = (creatorWeights[creatorKey] || 0) + (weight * 1.5);
+        creatorWeights[creatorKey] = (creatorWeights[creatorKey] || 0) + (weight * 1.8);
       }
 
-      // Analyze review text for sentiment & tags
+      // Review sentiment analysis (Nível 2)
       if (item.review && (rating >= 4 || isFav)) {
         const reviewText = item.review.toLowerCase();
-        Object.keys(keywordMap).forEach(kw => {
+        Object.keys(this.keywordMap).forEach(kw => {
           if (reviewText.includes(kw)) {
-            const mappedTag = keywordMap[kw];
-            tagWeights[mappedTag] = (tagWeights[mappedTag] || 0) + 8;
+            const mappedTag = this.keywordMap[kw];
+            tagWeights[mappedTag] = (tagWeights[mappedTag] || 0) + 10;
           }
         });
       }
     });
 
-    const avgPreferredBookPages = highRatedBooksCount > 0 ? (bookPagesSum / highRatedBooksCount) : 400;
+    const avgPreferredBookPages = highRatedBooksCount > 0 ? (bookPagesSum / highRatedBooksCount) : 380;
     const avgPreferredMovieDuration = highRatedMoviesCount > 0 ? (movieDurationSum / highRatedMoviesCount) : 130;
 
-    // Filter available catalog candidates
+    // Filter available candidates from catalog (exclude already in user library)
     const candidates = catalog.filter(catItem => {
-      return !consumedTitles.has(catItem.title.toLowerCase().trim());
+      return !consumedTitles.has((catItem.title || '').toLowerCase().trim());
     });
 
-    // Score candidates
+    // Score candidates with clear rationale
     const scoredCandidates = candidates.map(item => {
-      let score = 50; // baseline
+      let score = 50; // base score
       let rationale = '';
       let matchReason = '';
       let anchorItem = null;
 
-      // 1. Creator affinity (highest signal)
       const creatorKey = (item.creator || '').toLowerCase().trim();
+
+      // ==========================================
+      // NÍVEL 1: SINAIS DIRETOS (Autor, Diretor, Gênero, Favorito, Avaliação)
+      // ==========================================
       if (negativeCreators.has(creatorKey)) {
-        score -= 40;
+        score -= 45;
       } else if (creatorWeights[creatorKey] && creatorWeights[creatorKey] > 0) {
-        score += creatorWeights[creatorKey] * 1.8;
-        const matchingUserItem = userItems.find(u => (u.creator || '').toLowerCase().trim() === creatorKey && (u.rating >= 4 || u.isFavorite));
+        score += creatorWeights[creatorKey] * 2.0;
+        const matchingUserItem = userItems.find(u => 
+          (u.creator || '').toLowerCase().trim() === creatorKey && (u.rating >= 4 || u.isFavorite)
+        );
         if (matchingUserItem) {
           anchorItem = matchingUserItem;
-          rationale = `Recomendado porque você avaliou "${matchingUserItem.title}" com ${matchingUserItem.rating || 5} estrelas e adorou obras de ${item.creator}.`;
-          matchReason = `Afinidade com ${item.creator}`;
+          const role = item.type === 'book' ? 'do mesmo autor' : item.type === 'movie' ? 'do mesmo diretor' : 'do mesmo criador';
+          rationale = `${role.charAt(0).toUpperCase() + role.slice(1)} de "${matchingUserItem.title}" (${item.creator}).`;
+          matchReason = `Criador em destaque: ${item.creator}`;
         }
       }
 
-      // 2. Genre affinity
       if (negativeGenres.has(item.genre)) {
-        score -= 30;
+        score -= 35;
       } else if (genreWeights[item.genre]) {
-        score += genreWeights[item.genre] * 1.2;
-        if (!rationale && genreWeights[item.genre] >= 15) {
-          const matchingGenreItem = userPositiveAnchors.find(u => u.genre === item.genre);
+        score += genreWeights[item.genre] * 1.3;
+        if (!rationale && genreWeights[item.genre] >= 14) {
+          const matchingGenreItem = positiveAnchors.find(u => u.genre === item.genre);
           if (matchingGenreItem) {
             anchorItem = matchingGenreItem;
-            rationale = `Você avaliou muito bem "${matchingGenreItem.title}" e tem forte preferência por ${item.genre}.`;
+            if (matchingGenreItem.isFavorite) {
+              rationale = `Porque você favoritou "${matchingGenreItem.title}" e adora ${item.genre}.`;
+            } else if (matchingGenreItem.rating >= 4) {
+              rationale = `Porque você avaliou "${matchingGenreItem.title}" com nota alta.`;
+            } else {
+              rationale = `Você costuma gostar de conteúdos de ${item.genre}.`;
+            }
           } else {
-            rationale = `Recomendado porque você adora conteúdos de ${item.genre}.`;
+            rationale = `Você costuma gostar de ${item.genre}.`;
           }
-          matchReason = `Gênero favorito: ${item.genre}`;
+          matchReason = `Gênero: ${item.genre}`;
         }
       }
 
-      // 3. Multi-genre matching
+      // Multi-genre affinity
       if (Array.isArray(item.genres)) {
         item.genres.forEach(g => {
           if (genreWeights[g]) {
-            score += genreWeights[g] * 0.5;
+            score += genreWeights[g] * 0.4;
           }
         });
       }
 
-      // 4. Keyword / Tag matching from reviews
+      // Review / Tag matching (Nível 2)
       if (Array.isArray(item.tags)) {
         item.tags.forEach(tag => {
           if (tagWeights[tag]) {
-            score += tagWeights[tag] * 1.5;
+            score += tagWeights[tag] * 1.6;
             if (!rationale) {
-              rationale = `Você elogiou temas com "${tag}" e narrativas envolventes em suas resenhas recentes.`;
-              matchReason = `Tema em alta: ${tag}`;
+              rationale = `Com base nas suas resenhas sobre temas de "${tag}".`;
+              matchReason = `Tema favorito: ${tag}`;
             }
           }
         });
       }
 
-      // 5. Length preferences
+      // Volume & Length Patterns (Nível 2)
       if (item.type === 'book' && item.pages) {
         const diff = Math.abs(item.pages - avgPreferredBookPages);
-        if (diff < 150) score += 10;
-        else if (diff > 400) score -= 5;
+        if (diff < 120) score += 12;
+        else if (diff > 450) score -= 8;
       } else if (item.type === 'movie' && item.duration) {
         const diff = Math.abs(item.duration - avgPreferredMovieDuration);
-        if (diff < 25) score += 10;
+        if (diff < 25) score += 12;
       }
 
-      // 6. Public quality score baseline
+      // Baseline public rating factor (Nível 1)
       score += (item.rating || 4.5) * 4;
 
-      // Fallback rationale if none triggered yet
+      // ==========================================
+      // NÍVEL 3: PREPARAÇÃO PARA ALGORITMOS FUTUROS
+      // ==========================================
+      // Framework pronto para plugar vetores de embeddings / IA local
+      score = this._applyLevel3FutureScore(item, userItems, score);
+
+      // Fallback transparente se não houver dados específicos suficientes
       if (!rationale) {
-        if (item.type === 'book') {
-          rationale = `Um dos livros mais aclamados de ${item.genre}, perfeito para expandir seus horizontes literários.`;
-          matchReason = `Destaque em ${item.genre}`;
-        } else if (item.type === 'movie') {
-          rationale = `Filme aclamado pela crítica que combina perfeitamente com sua biblioteca cinematográfica.`;
-          matchReason = `Clássico do cinema`;
+        if (positiveAnchors.length > 0) {
+          const firstAnchor = positiveAnchors[0];
+          rationale = `Parecido com "${firstAnchor.title}" no ritmo e temática.`;
+          matchReason = 'Conteúdo semelhante';
         } else {
-          rationale = `Série com roteiro premiado e ritmo instigante altamente recomendada para você.`;
-          matchReason = `Série imperdível`;
+          rationale = 'Recomendado para você com base na curadoria cultural.';
+          matchReason = 'Recomendado para você';
         }
       }
 
-      // Calculate compatibility percentage (bounded between 78% and 99%)
-      const matchPercentage = Math.min(99, Math.max(78, Math.round(score * 0.65)));
+      const matchPercentage = Math.min(99, Math.max(80, Math.round(score * 0.65)));
 
       return {
         ...item,
@@ -238,37 +259,108 @@ const Recommender = {
       };
     });
 
-    // Sort by score descending
-    scoredCandidates.sort((a, b) => b.score - a.score);
+    // Deterministic sort: score descending, then rating, then title
+    scoredCandidates.sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      if (b.rating !== a.rating) return b.rating - a.rating;
+      return (a.title || '').localeCompare(b.title || '');
+    });
 
-    // Group recommendations by type
     const recommendedBooks = scoredCandidates.filter(c => c.type === 'book').slice(0, 8);
     const recommendedMovies = scoredCandidates.filter(c => c.type === 'movie').slice(0, 8);
     const recommendedSeries = scoredCandidates.filter(c => c.type === 'series').slice(0, 8);
 
-    // Filter "Porque você gostou..." spotlight pairs (items with a distinct anchor)
+    // Filter "Porque você gostou..." spotlight items (has explicit anchor)
     const becauseYouLiked = scoredCandidates
       .filter(c => c.anchorItem)
       .slice(0, 6);
 
-    // If becauseYouLiked has few items, fallback to top scored with simulated anchor from favorites
-    if (becauseYouLiked.length < 3 && userPositiveAnchors.length > 0) {
-      scoredCandidates.slice(0, 4).forEach(cand => {
+    // Deterministic fallback if few items have explicit anchors
+    if (becauseYouLiked.length < 3 && positiveAnchors.length > 0) {
+      scoredCandidates.slice(0, 4).forEach((cand, idx) => {
         if (!becauseYouLiked.some(b => b.id === cand.id)) {
-          const randomAnchor = userPositiveAnchors[Math.floor(Math.random() * userPositiveAnchors.length)];
-          cand.anchorItem = cand.anchorItem || randomAnchor;
-          cand.rationale = cand.rationale || `Você deu nota máxima para "${randomAnchor.title}" e vai amar essa produção.`;
+          const anchor = positiveAnchors[idx % positiveAnchors.length];
+          cand.anchorItem = cand.anchorItem || anchor;
+          if (!cand.rationale || cand.rationale.startsWith('Recomendado para você')) {
+            cand.rationale = `Porque você avaliou "${anchor.title}" com ${anchor.rating || 5} estrelas.`;
+          }
           becauseYouLiked.push(cand);
         }
       });
     }
 
     return {
-      all: scoredCandidates.slice(0, 15),
+      all: scoredCandidates.slice(0, 16),
       books: recommendedBooks,
       movies: recommendedMovies,
       series: recommendedSeries,
       becauseYouLiked: becauseYouLiked
     };
+  },
+
+  // Level 3 Extensibility Hook for future Machine Learning / Embeddings
+  _applyLevel3FutureScore(item, userItems, currentScore) {
+    // Structure prepared for collaborative filtering or semantic vector similarity
+    return currentScore;
+  },
+
+  // Related recommendations for Item Details Page ("Você também pode gostar")
+  getRelatedRecommendations(targetItem, count = 4) {
+    if (!targetItem) return [];
+    const catalog = Storage.getCatalog() || [];
+    const targetTitle = (targetItem.title || '').toLowerCase().trim();
+    const targetCreator = (targetItem.creator || '').toLowerCase().trim();
+    const targetGenre = (targetItem.genre || '').toLowerCase();
+    const targetTags = Array.isArray(targetItem.tags) ? targetItem.tags.map(t => t.toLowerCase()) : [];
+
+    const candidates = catalog.filter(c => (c.title || '').toLowerCase().trim() !== targetTitle);
+
+    const scored = candidates.map(c => {
+      let simScore = 0;
+      let relationReason = '';
+
+      // Same creator is highest affinity
+      if (c.creator && c.creator.toLowerCase().trim() === targetCreator && targetCreator !== 'desconhecido') {
+        simScore += 60;
+        relationReason = `Do mesmo ${c.type === 'book' ? 'autor' : c.type === 'movie' ? 'diretor' : 'criador'} (${c.creator})`;
+      }
+
+      // Same primary genre
+      if (c.genre && c.genre.toLowerCase() === targetGenre) {
+        simScore += 35;
+        if (!relationReason) relationReason = `Do mesmo gênero (${c.genre})`;
+      }
+
+      // Same format bonus
+      if (c.type === targetItem.type) {
+        simScore += 15;
+      }
+
+      // Tag overlap
+      if (Array.isArray(c.tags)) {
+        c.tags.forEach(t => {
+          if (targetTags.includes(t.toLowerCase())) {
+            simScore += 10;
+            if (!relationReason) relationReason = `Tema compartilhado: ${t}`;
+          }
+        });
+      }
+
+      // Public rating tiebreaker
+      simScore += (c.rating || 4.5) * 3;
+
+      if (!relationReason) {
+        relationReason = `História aclamada de ${c.genre}`;
+      }
+
+      return {
+        ...c,
+        simScore,
+        relationReason
+      };
+    });
+
+    scored.sort((a, b) => b.simScore - a.simScore);
+    return scored.slice(0, count);
   }
 };
