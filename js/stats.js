@@ -23,8 +23,9 @@ const Stats = {
       : '0.0';
 
     // ----------------- BOOKS STATS & PAGE COUNTER -----------------
-    // Automatically sum pages of read books (or reading books)
     const totalPagesRead = booksRead.reduce((acc, b) => acc + (b.pages || 0), 0);
+    const booksReading = books.filter(b => b.status === 'reading');
+    const inProgressPages = booksReading.reduce((acc, b) => acc + (b.currentPage || 0), 0);
     const totalBooksReadCount = booksRead.length;
     const avgPagesPerBook = totalBooksReadCount > 0 ? Math.round(totalPagesRead / totalBooksReadCount) : 0;
 
@@ -43,8 +44,8 @@ const Stats = {
     });
     const topBookGenre = this.getTopKeyFromObj(bookGenreCounts) || 'N/A';
 
-    // Books average rating
-    const ratedBooks = books.filter(b => b.rating > 0);
+    // Books average rating — only for books actually read (status === 'read')
+    const ratedBooks = booksRead.filter(b => b.rating > 0);
     const avgBookRating = ratedBooks.length > 0
       ? (ratedBooks.reduce((acc, b) => acc + b.rating, 0) / ratedBooks.length).toFixed(1)
       : '0.0';
@@ -72,7 +73,7 @@ const Stats = {
       ? (ratedMovies.reduce((acc, m) => acc + m.rating, 0) / ratedMovies.length).toFixed(1)
       : '0.0';
 
-    const favoriteMovies = movies.filter(m => m.isFavorite || m.rating === 5);
+    const favoriteMovies = movies.filter(m => m.isFavorite === true);
 
     // ----------------- SERIES STATS -----------------
     const totalSeriesCount = series.length;
@@ -95,7 +96,7 @@ const Stats = {
       ? (ratedSeries.reduce((acc, s) => acc + s.rating, 0) / ratedSeries.length).toFixed(1)
       : '0.0';
 
-    const favoriteSeries = series.filter(s => s.isFavorite || s.rating === 5);
+    const favoriteSeries = series.filter(s => s.isFavorite === true);
 
     // ----------------- RATINGS DISTRIBUTION (1 to 5 stars) -----------------
     const ratingDistribution = { 1: 0, 2: 0, 3: 0, 4: 0, 5: 0 };
@@ -116,8 +117,8 @@ const Stats = {
       .map(([name, count]) => ({ name, count }))
       .sort((a, b) => b.count - a.count);
 
-    // Favorites list
-    const allFavorites = items.filter(i => i.isFavorite || i.rating === 5);
+    // Favorites list (exclusively items marked with heart / isFavorite === true)
+    const allFavorites = items.filter(i => i.isFavorite === true);
 
     // Recently added items
     const recentlyAdded = [...items]
@@ -135,7 +136,8 @@ const Stats = {
       books: {
         total: books.length,
         read: totalBooksReadCount,
-        reading: books.filter(b => b.status === 'reading').length,
+        reading: booksReading.length,
+        inProgressPages: inProgressPages,
         wantToRead: books.filter(b => b.status === 'want_to_read').length,
         totalPagesRead,
         avgPagesPerBook,

@@ -46,6 +46,8 @@ const Recommender = {
     // ==========================================
     const genreWeights = {};
     const genreCounts = {};
+    const genrePositiveCounts = {};
+    const genreNegativeCounts = {};
     const creatorWeights = {};
     const tagWeights = {};
     const negativeGenres = new Set();
@@ -59,6 +61,24 @@ const Recommender = {
       user.favoriteGenres.forEach(genre => {
         genreWeights[genre] = (genreWeights[genre] || 0) + 14;
       });
+    }
+
+    // Onboarding-derived preferences (Nível 1 — explicit user input)
+    let onboardingPreferredFormats = [];
+    if (user && user.id !== 'usr_demo_lucas') {
+      const onboardingData = Storage.getOnboarding(user.id);
+      if (onboardingData) {
+        // Boost genres from onboarding (slightly stronger than favoriteGenres since they're explicit)
+        if (Array.isArray(onboardingData.preferredGenres)) {
+          onboardingData.preferredGenres.forEach(genre => {
+            genreWeights[genre] = (genreWeights[genre] || 0) + 18;
+          });
+        }
+        // Track preferred formats to boost matching type candidates
+        if (Array.isArray(onboardingData.preferredFormats)) {
+          onboardingPreferredFormats = onboardingData.preferredFormats;
+        }
+      }
     }
 
     // Metrics for consumption patterns (Nível 2)
@@ -103,10 +123,16 @@ const Recommender = {
         }
       }
 
-      // Record negative signals
-      if (rating > 0 && rating <= 2) {
-        if (item.genre) negativeGenres.add(item.genre);
-        if (item.creator) negativeCreators.add(item.creator.toLowerCase().trim());
+      // Record sentiment signals avoiding treating a single low rating as total genre rejection
+      if (item.genre) {
+        if (rating > 0 && rating <= 2) {
+          genreNegativeCounts[item.genre] = (genreNegativeCounts[item.genre] || 0) + 1;
+        } else if (rating >= 4 || isFav) {
+          genrePositiveCounts[item.genre] = (genrePositiveCounts[item.genre] || 0) + 1;
+        }
+      }
+      if (rating > 0 && rating <= 2 && item.creator) {
+        negativeCreators.add(item.creator.toLowerCase().trim());
       }
 
       // Genre weights (Nível 1 & 2)
@@ -137,12 +163,21 @@ const Recommender = {
       }
     });
 
+    // Determine truly rejected genres (where negative votes strictly exceed positive votes and >= 2 negatives)
+    Object.keys(genreNegativeCounts).forEach(g => {
+      const negs = genreNegativeCounts[g] || 0;
+      const pos = genrePositiveCounts[g] || 0;
+      if (negs >= 2 && negs > pos) {
+        negativeGenres.add(g);
+      }
+    });
+
     const avgPreferredBookPages = highRatedBooksCount > 0 ? (bookPagesSum / highRatedBooksCount) : 380;
     const avgPreferredMovieDuration = highRatedMoviesCount > 0 ? (movieDurationSum / highRatedMoviesCount) : 130;
 
-    // Filter available candidates from catalog (exclude already in user library)
+    // Filter available candidates from catalog (strictly exclude items already in user's library)
     const candidates = catalog.filter(catItem => {
-      return !consumedTitles.has((catItem.title || '').toLowerCase().trim());
+      return !Storage.isItemInLibrary(userId, catItem);
     });
 
     // Score candidates with clear rationale
@@ -224,6 +259,11 @@ const Recommender = {
       } else if (item.type === 'movie' && item.duration) {
         const diff = Math.abs(item.duration - avgPreferredMovieDuration);
         if (diff < 25) score += 12;
+      }
+
+      // Onboarding preferred format boost (explicit user preference)
+      if (onboardingPreferredFormats.length > 0 && onboardingPreferredFormats.includes(item.type)) {
+        score += 20;
       }
 
       // Baseline public rating factor (Nível 1)
@@ -308,12 +348,18 @@ const Recommender = {
   getRelatedRecommendations(targetItem, count = 4) {
     if (!targetItem) return [];
     const catalog = Storage.getCatalog() || [];
+    const user = Storage.getCurrentUser();
+    const userId = user ? user.id : null;
     const targetTitle = (targetItem.title || '').toLowerCase().trim();
     const targetCreator = (targetItem.creator || '').toLowerCase().trim();
     const targetGenre = (targetItem.genre || '').toLowerCase();
     const targetTags = Array.isArray(targetItem.tags) ? targetItem.tags.map(t => t.toLowerCase()) : [];
 
-    const candidates = catalog.filter(c => (c.title || '').toLowerCase().trim() !== targetTitle);
+    const candidates = catalog.filter(c => {
+      if ((c.title || '').toLowerCase().trim() === targetTitle || c.id === targetItem.id) return false;
+      if (userId && Storage.isItemInLibrary(userId, c)) return false;
+      return true;
+    });
 
     const scored = candidates.map(c => {
       let simScore = 0;

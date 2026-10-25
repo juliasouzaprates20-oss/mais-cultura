@@ -569,6 +569,49 @@ function getFallbackCoverSvg(title, type) {
   return 'data:image/svg+xml;charset=utf-8,' + encodeURIComponent(svg).replace(/'/g, '%27');
 }
 
+// Normalizador Central de Gêneros Culturais
+const GenreNormalizer = {
+  normalize(genre) {
+    if (!genre || typeof genre !== 'string') return 'Geral';
+    const clean = genre
+      .trim()
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '');
+
+    if (/sci[\s-]?fi|science[\s-]?fiction|ficcao[\s-]?cientifica/.test(clean)) return 'Ficção Científica';
+    if (/fantasia|fantasy/.test(clean)) return 'Fantasia';
+    if (/distopia|dystopia/.test(clean)) return 'Distopia';
+    if (/terror|horror/.test(clean)) return 'Terror';
+    if (/suspense|thriller|misterio|mystery/.test(clean)) return 'Suspense';
+    if (/romance|romantico|romantic/.test(clean)) return 'Romance';
+    if (/acao|action|aventura|adventure/.test(clean)) return 'Ação & Aventura';
+    if (/comedia|comedy/.test(clean)) return 'Comédia';
+    if (/drama|dramas/.test(clean)) return 'Drama';
+    if (/historia|history|historical/.test(clean)) return 'História';
+    if (/biografia|biography|memoir|autobiografia/.test(clean)) return 'Biografia';
+    if (/animacao|animation|anime/.test(clean)) return 'Animação';
+    if (/policial|crime|detetive|detective|mafia/.test(clean)) return 'Policial & Crime';
+    if (/documentario|documentary/.test(clean)) return 'Documentário';
+    if (/filosofia|philosophy/.test(clean)) return 'Filosofia';
+    if (/classico|classic|classicos/.test(clean)) return 'Clássico';
+    if (/fabula|fable/.test(clean)) return 'Fábula';
+    if (/literatura|literature/.test(clean)) return 'Literatura';
+
+    return genre.charAt(0).toUpperCase() + genre.slice(1).trim();
+  },
+
+  match(g1, g2) {
+    if (!g1 || !g2) return false;
+    if (g1 === 'all' || g2 === 'all') return true;
+    return this.normalize(g1).toLowerCase() === this.normalize(g2).toLowerCase();
+  }
+};
+if (typeof window !== 'undefined') {
+  window.GenreNormalizer = GenreNormalizer;
+  window.normalizeGenre = (g) => GenreNormalizer.normalize(g);
+}
+
 // Live External Search Integration for OpenLibrary (Books), iTunes (Movies) & TVMaze (Series)
 const SearchService = {
   _cache: new Map(),
@@ -592,17 +635,19 @@ const SearchService = {
           ? `https://covers.openlibrary.org/b/isbn/${isbn}-L.jpg`
           : getFallbackCoverSvg(doc.title, 'book');
 
-        const genres = Array.isArray(doc.subject) && doc.subject.length > 0 
+        const rawGenres = Array.isArray(doc.subject) && doc.subject.length > 0 
           ? doc.subject.slice(0, 3) 
           : ['Literatura'];
+        const normalizedGenre = GenreNormalizer.normalize(rawGenres[0]);
+        const normalizedGenres = rawGenres.map(g => GenreNormalizer.normalize(g));
 
         return {
           id: `ol_${(doc.key || '').replace('/works/', '') || Date.now()}`,
           type: 'book',
           title: doc.title || 'Sem título',
           creator: doc.author_name ? doc.author_name[0] : 'Autor desconhecido',
-          genre: genres[0],
-          genres: genres,
+          genre: normalizedGenre,
+          genres: normalizedGenres,
           year: doc.first_publish_year || new Date().getFullYear(),
           pages: doc.number_of_pages_median || (doc.number_of_pages ? doc.number_of_pages[0] : 320),
           isbn: isbn || '',
@@ -610,7 +655,7 @@ const SearchService = {
           cover: coverUrl,
           rating: 4.8,
           synopsis: `Obra do acervo Open Library. Primeira publicação registrada em ${doc.first_publish_year || 'edição clássica'}.`,
-          tags: genres.map(g => g.toLowerCase())
+          tags: normalizedGenres.map(g => g.toLowerCase())
         };
       });
 
@@ -632,20 +677,24 @@ const SearchService = {
       const res = await fetch(url);
       if (!res.ok) return [];
       const data = await res.json();
-      const results = (data.results || []).map(item => ({
-        id: `itunes_${item.trackId}`,
-        type: 'movie',
-        title: item.trackName || 'Sem título',
-        creator: item.artistName || 'Diretor aclamado',
-        genre: item.primaryGenreName || 'Cinema',
-        genres: [item.primaryGenreName || 'Cinema'],
-        year: item.releaseDate ? new Date(item.releaseDate).getFullYear() : 2020,
-        duration: Math.round((item.trackTimeMillis || 7200000) / 60000),
-        cover: (item.artworkUrl100 || '').replace('100x100bb', '600x600bb') || getFallbackCoverSvg(item.trackName, 'movie'),
-        rating: 4.8,
-        synopsis: item.longDescription || item.shortDescription || 'Produção cinematográfica de destaque.',
-        tags: [item.primaryGenreName || 'Cinema', 'filme']
-      }));
+      const results = (data.results || []).map(item => {
+        const rawGenre = item.primaryGenreName || 'Cinema';
+        const normGenre = GenreNormalizer.normalize(rawGenre);
+        return {
+          id: `itunes_${item.trackId}`,
+          type: 'movie',
+          title: item.trackName || 'Sem título',
+          creator: item.artistName || 'Diretor aclamado',
+          genre: normGenre,
+          genres: [normGenre],
+          year: item.releaseDate ? new Date(item.releaseDate).getFullYear() : 2020,
+          duration: Math.round((item.trackTimeMillis || 7200000) / 60000),
+          cover: (item.artworkUrl100 || '').replace('100x100bb', '600x600bb') || getFallbackCoverSvg(item.trackName, 'movie'),
+          rating: 4.8,
+          synopsis: item.longDescription || item.shortDescription || 'Produção cinematográfica de destaque.',
+          tags: [normGenre.toLowerCase(), 'filme']
+        };
+      });
 
       this._cache.set(cacheKey, results);
       return results;
@@ -668,7 +717,9 @@ const SearchService = {
       const results = (data || []).slice(0, 8).map(entry => {
         const show = entry.show || {};
         const year = show.premiered ? new Date(show.premiered).getFullYear() : 2021;
-        const genres = Array.isArray(show.genres) && show.genres.length > 0 ? show.genres : ['Drama'];
+        const rawGenres = Array.isArray(show.genres) && show.genres.length > 0 ? show.genres : ['Drama'];
+        const normGenre = GenreNormalizer.normalize(rawGenres[0]);
+        const normGenres = rawGenres.map(g => GenreNormalizer.normalize(g));
         const cover = (show.image && (show.image.original || show.image.medium)) 
           ? (show.image.original || show.image.medium) 
           : getFallbackCoverSvg(show.name, 'series');
@@ -693,15 +744,15 @@ const SearchService = {
           type: 'series',
           title: show.name || 'Sem título',
           creator: creator,
-          genre: genres[0],
-          genres: genres,
+          genre: normGenre,
+          genres: normGenres,
           year: year,
           seasons: seasons,
           episodes: episodes,
           cover: cover,
           rating: show.rating && show.rating.average ? Math.min(5, (show.rating.average / 2)).toFixed(1) : 4.8,
           synopsis: cleanSummary || 'Série aclamada com narrativa instigante.',
-          tags: genres.map(g => g.toLowerCase())
+          tags: normGenres.map(g => g.toLowerCase())
         };
       });
 

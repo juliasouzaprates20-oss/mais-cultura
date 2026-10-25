@@ -7,7 +7,8 @@ const STORAGE_KEYS = {
   CATALOG: 'mais_cultura_catalog_v4',
   USER_ITEMS_PREFIX: 'mais_cultura_items_v4_',
   USER_ACTIVITY_PREFIX: 'mais_cultura_activity_v4_',
-  DEMO_SESSION: 'mais_cultura_demo_session_v4'
+  DEMO_SESSION: 'mais_cultura_demo_session_v4',
+  USER_ONBOARDING_PREFIX: 'mais_cultura_onboarding_v4_'
 };
 
 const Storage = {
@@ -185,7 +186,17 @@ const Storage = {
     if (!userId) return [];
     try {
       const data = localStorage.getItem(STORAGE_KEYS.USER_ITEMS_PREFIX + userId);
-      return data ? JSON.parse(data) : [];
+      const items = data ? JSON.parse(data) : [];
+      return items.map(item => ({
+        ...item,
+        isFavorite: item.isFavorite === true,
+        currentPage: item.type === 'book'
+          ? (item.currentPage !== undefined
+              ? item.currentPage
+              : (item.status === 'read' ? (item.pages || 0) : 0))
+          : 0,
+        readingHistory: Array.isArray(item.readingHistory) ? item.readingHistory : []
+      }));
     } catch (e) {
       console.error('Error fetching user items', e);
       return [];
@@ -220,20 +231,37 @@ const Storage = {
       isbn: itemData.isbn || '',
       publisher: itemData.publisher || '',
 
-      pages: itemData.type === 'book' ? Math.max(1, parseInt(itemData.pages, 10) || 100) : 0,
+      pages: itemData.type === 'book' ? (parseInt(itemData.pages, 10) > 0 ? parseInt(itemData.pages, 10) : 0) : 0,
       duration: itemData.type === 'movie' ? Math.max(1, parseInt(itemData.duration, 10) || 90) : 0,
       seasons: itemData.type === 'series' ? Math.max(1, parseInt(itemData.seasons, 10) || 1) : 0,
       episodes: itemData.type === 'series' ? Math.max(1, parseInt(itemData.episodes, 10) || 10) : 0,
+
+      currentPage: itemData.type === 'book'
+        ? (parseInt(itemData.pages, 10) > 0
+            ? Math.min(Math.max(0, parseInt(itemData.currentPage, 10) || 0), parseInt(itemData.pages, 10))
+            : Math.max(0, parseInt(itemData.currentPage, 10) || 0))
+        : 0,
+      readingHistory: Array.isArray(itemData.readingHistory) ? itemData.readingHistory : [],
 
       status: itemData.status || (itemData.type === 'book' ? 'read' : itemData.type === 'movie' ? 'watched' : 'completed'),
       rating: parseFloat(itemData.rating) || 0,
       review: (itemData.review || '').trim(),
       dateStarted: itemData.dateStarted || null,
-      dateFinished: itemData.dateFinished || new Date().toISOString().split('T')[0],
-      isFavorite: !!itemData.isFavorite,
+      dateFinished: itemData.dateFinished || (itemData.status === 'read' || itemData.status === 'watched' || itemData.status === 'completed' ? new Date().toISOString().split('T')[0] : null),
+      isFavorite: itemData.isFavorite === true,
       addedAt: new Date().toISOString(),
       updatedAt: new Date().toISOString()
     };
+
+    if (newItem.type === 'book' && newItem.currentPage > 0 && newItem.readingHistory.length === 0) {
+      newItem.readingHistory.push({
+        itemId: newItem.id,
+        userId: userId,
+        previousPage: 0,
+        newPage: newItem.currentPage,
+        timestamp: new Date().toISOString()
+      });
+    }
 
     items.unshift(newItem);
     this.saveUserItems(userId, items);
@@ -263,10 +291,34 @@ const Storage = {
 
     if (updates.isbn !== undefined) updated.isbn = updates.isbn;
     if (updates.publisher !== undefined) updated.publisher = updates.publisher;
+    if (updates.isFavorite !== undefined) updated.isFavorite = updates.isFavorite === true;
 
-    if (updated.type === 'book' && updates.pages !== undefined) {
-      updated.pages = Math.max(1, parseInt(updates.pages, 10) || 100);
+    if (updated.type === 'book') {
+      if (updates.pages !== undefined) {
+        const p = parseInt(updates.pages, 10);
+        updated.pages = (!isNaN(p) && p > 0) ? p : 0;
+      }
+      if (updates.currentPage !== undefined) {
+        const cur = parseInt(updates.currentPage, 10);
+        const validCur = (!isNaN(cur) && cur >= 0) ? cur : 0;
+        updated.currentPage = (updated.pages > 0) ? Math.min(validCur, updated.pages) : validCur;
+
+        const prevPage = oldItem.currentPage || 0;
+        if (updated.currentPage !== prevPage) {
+          if (!Array.isArray(updated.readingHistory)) {
+            updated.readingHistory = Array.isArray(oldItem.readingHistory) ? [...oldItem.readingHistory] : [];
+          }
+          updated.readingHistory.push({
+            itemId: itemId,
+            userId: userId,
+            previousPage: prevPage,
+            newPage: updated.currentPage,
+            timestamp: new Date().toISOString()
+          });
+        }
+      }
     }
+
     if (updated.type === 'movie' && updates.duration !== undefined) {
       updated.duration = Math.max(1, parseInt(updates.duration, 10) || 90);
     }
@@ -299,6 +351,110 @@ const Storage = {
     return updated;
   },
 
+  updateReadingProgress(userId, itemId, newPage, newTotalPages = null) {
+    if (!userId) throw new Error('Usuário não autenticado.');
+    const items = this.getUserItems(userId);
+    const item = items.find(i => i.id === itemId);
+    if (!item || item.type !== 'book') return null;
+
+    const updates = {
+      currentPage: Math.max(0, parseInt(newPage, 10) || 0)
+    };
+
+    if (newTotalPages !== null && newTotalPages !== undefined) {
+      const p = parseInt(newTotalPages, 10);
+      if (!isNaN(p) && p > 0) updates.pages = p;
+    }
+
+    const updated = this.updateItem(userId, itemId, updates);
+
+    this.logActivity(userId, {
+      type: 'reading_progress',
+      title: item.title,
+      mediaType: 'book',
+      details: `Progresso atualizado: pág. ${updated.currentPage}${updated.pages ? ` de ${updated.pages}` : ''}`
+    });
+
+    return updated;
+  },
+
+  markAsRead(userId, itemId) {
+    if (!userId) throw new Error('Usuário não autenticado.');
+    const items = this.getUserItems(userId);
+    const item = items.find(i => i.id === itemId);
+    if (!item) return null;
+
+    const updates = {
+      status: 'read',
+      dateFinished: new Date().toISOString().split('T')[0]
+    };
+    if (item.type === 'book' && item.pages > 0) {
+      updates.currentPage = item.pages;
+    }
+
+    const updated = this.updateItem(userId, itemId, updates);
+
+    this.logActivity(userId, {
+      type: 'completed',
+      title: item.title,
+      mediaType: item.type,
+      details: `Concluído e marcado como Lido! 🏆`
+    });
+
+    return updated;
+  },
+
+  isItemInLibrary(userId, item) {
+    if (!userId || !item) return false;
+    const userItems = this.getUserItems(userId);
+    if (!userItems || !userItems.length) return false;
+
+    const normalizeStr = (s) => (s || '')
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .replace(/[^\w\s]/gi, '')
+      .replace(/\s+/g, ' ')
+      .trim();
+
+    const targetTitle = normalizeStr(item.title);
+    const targetType = item.type;
+    const targetId = item.id || item.catalogId;
+    const targetIsbn = (item.isbn || '').replace(/[-\s]/g, '').toLowerCase();
+    const targetCreator = normalizeStr(item.creator);
+
+    return userItems.some(u => {
+      // 1. Identificador de catálogo / id interno
+      if (targetId && (u.id === targetId || u.catalogId === targetId)) {
+        return true;
+      }
+      // 2. ISBN para livros
+      if (targetType === 'book' && u.type === 'book' && targetIsbn && u.isbn) {
+        const uIsbn = u.isbn.replace(/[-\s]/g, '').toLowerCase();
+        if (uIsbn && uIsbn === targetIsbn) return true;
+      }
+      // 3. Identificador de API externa
+      if (item.apiId && u.apiId && item.apiId === u.apiId) {
+        return true;
+      }
+      // 4. Título normalizado + tipo + criador
+      if (targetTitle && u.title && u.type === targetType) {
+        const uTitle = normalizeStr(u.title);
+        if (uTitle === targetTitle) {
+          if (targetCreator && u.creator) {
+            const uCreator = normalizeStr(u.creator);
+            if (uCreator === targetCreator || uCreator.includes(targetCreator) || targetCreator.includes(uCreator)) {
+              return true;
+            }
+          } else {
+            return true;
+          }
+        }
+      }
+      return false;
+    });
+  },
+
   deleteItem(userId, itemId) {
     if (!userId) throw new Error('Usuário não autenticado.');
     let items = this.getUserItems(userId);
@@ -323,7 +479,7 @@ const Storage = {
     const item = items.find(i => i.id === itemId);
     if (!item) return false;
 
-    item.isFavorite = !item.isFavorite;
+    item.isFavorite = item.isFavorite !== true;
     item.updatedAt = new Date().toISOString();
     this.saveUserItems(userId, items);
 
@@ -578,6 +734,14 @@ const Storage = {
         genres: [b.genre],
         year: b.year,
         pages: b.pages,
+        currentPage: b.status === 'reading' ? 68 : (b.status === 'read' ? b.pages : 0),
+        readingHistory: b.status === 'reading' ? [{
+          itemId: `demo_book_${idx + 1}`,
+          userId: 'usr_demo_lucas',
+          previousPage: 0,
+          newPage: 68,
+          timestamp: new Date(Date.now() - 86400000).toISOString()
+        }] : [],
         cover: b.cover,
         synopsis: b.review,
         status: b.status,
@@ -585,7 +749,7 @@ const Storage = {
         review: b.review,
         dateFinished: b.status === 'read' ? '2024-0' + ((idx % 9) + 1) + '-15' : null,
         dateStarted: '2024-01-10',
-        isFavorite: b.fav,
+        isFavorite: b.fav === true,
         addedAt: new Date(Date.now() - (idx + 1) * 86400000 * 5).toISOString(),
         updatedAt: new Date().toISOString()
       });
@@ -696,5 +860,53 @@ const Storage = {
 
     // NOTE: Demo user is seeded but NEVER auto-logged in.
     // The user must explicitly click "Explorar demonstração" to enter demo mode.
+  },
+
+  // ------------------ ONBOARDING (per-user, never touches demo) ------------------
+  getOnboarding(userId) {
+    if (!userId || userId === 'usr_demo_lucas') return null;
+    try {
+      const data = localStorage.getItem(STORAGE_KEYS.USER_ONBOARDING_PREFIX + userId);
+      return data ? JSON.parse(data) : null;
+    } catch (e) {
+      console.error('Error reading onboarding data', e);
+      return null;
+    }
+  },
+
+  saveOnboarding(userId, onboardingData) {
+    if (!userId || userId === 'usr_demo_lucas') return;
+    const existing = this.getOnboarding(userId) || {};
+    const merged = { ...existing, ...onboardingData, updatedAt: new Date().toISOString() };
+    localStorage.setItem(STORAGE_KEYS.USER_ONBOARDING_PREFIX + userId, JSON.stringify(merged));
+    return merged;
+  },
+
+  markOnboardingComplete(userId) {
+    if (!userId || userId === 'usr_demo_lucas') return;
+    const data = this.getOnboarding(userId) || {};
+    data.status = 'completed';
+    data.completedAt = new Date().toISOString();
+    localStorage.setItem(STORAGE_KEYS.USER_ONBOARDING_PREFIX + userId, JSON.stringify(data));
+    // Update user favoriteGenres from onboarding preferences
+    if (data.preferredGenres && data.preferredGenres.length > 0) {
+      try {
+        const users = this.getUsers();
+        const idx = users.findIndex(u => u.id === userId);
+        if (idx !== -1) {
+          users[idx].favoriteGenres = data.preferredGenres;
+          this.saveUsers(users);
+        }
+      } catch (e) {
+        console.error('Error updating favoriteGenres from onboarding', e);
+      }
+    }
+    return data;
+  },
+
+  needsOnboarding(userId) {
+    if (!userId || userId === 'usr_demo_lucas') return false;
+    const data = this.getOnboarding(userId);
+    return !data || data.status !== 'completed';
   }
 };

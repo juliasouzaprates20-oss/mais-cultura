@@ -23,6 +23,9 @@ const UI = {
     // Never auto-log into demo on fresh visit!
     const user = Storage.getCurrentUser();
     if (user) {
+      if (typeof Onboarding !== 'undefined' && Onboarding.checkAndLaunch(user.id)) {
+        return; // Resumed onboarding wizard
+      }
       this.navigate('dashboard');
     } else {
       this.navigate('auth');
@@ -304,7 +307,28 @@ const UI = {
       .sort((a, b) => new Date(b.addedAt || 0) - new Date(a.addedAt || 0))
       .slice(0, 4);
 
+    // Show a subtle banner if onboarding is incomplete/deferred
+    const isDemoUser = user.id === 'usr_demo_lucas';
+    const showOnboardingBanner = !isDemoUser && typeof Onboarding !== 'undefined' && Storage.needsOnboarding(user.id);
+    const onboardingData = !isDemoUser ? Storage.getOnboarding(user.id) : null;
+    const onboardingDeferred = onboardingData && onboardingData.status === 'in_progress';
+
     content.innerHTML = `
+      <!-- ================= BANNER ONBOARDING (deferred) ================= -->
+      ${showOnboardingBanner ? `
+        <div class="onboarding-dashboard-banner" id="onboarding-dashboard-banner">
+          <div class="onboarding-banner-text">
+            <h4>🎭 ${onboardingDeferred ? 'Continue configurando suas preferências' : 'Personalize sua experiência'}</h4>
+            <p>${onboardingDeferred ? 'Você deixou para depois — continue de onde parou e ative recomendações personalizadas.' : 'Responda algumas perguntas rápidas e receba recomendações que combinam com você.'}</p>
+          </div>
+          <div class="onboarding-banner-actions">
+            <button class="btn btn-primary btn-sm" onclick="Onboarding._launchForUser('${user.id}')">
+              ${onboardingDeferred ? '▶ Continuar' : '✨ Configurar agora'}
+            </button>
+          </div>
+        </div>
+      ` : ''}
+
       <!-- ================= HERO EDITORIAL COM SAUDAÇÃO ================= -->
       <section class="editorial-hero-card">
         <div class="hero-left-content">
@@ -364,37 +388,74 @@ const UI = {
         </div>
       </section>
 
-      <!-- ================= SEÇÃO: CONTINUE DE ONDE PAROU ================= -->
-      ${inProgressItems.length > 0 ? `
-        <section class="editorial-section">
-          <div class="section-editorial-header">
-            <h2 class="section-editorial-title">📖 Continue de onde parou</h2>
-            <span class="text-muted" style="font-size: 13.5px;">Obras atualmente em andamento</span>
-          </div>
-          <div class="continue-reading-container">
-            ${inProgressItems.map(item => `
+      <!-- ================= SEÇÃO: CONTINUE LENDO & ACOMPANHAMENTO ================= -->
+      <section class="editorial-section">
+        <div class="section-editorial-header">
+          <h2 class="section-editorial-title">📖 Continue de onde parou</h2>
+          <span class="text-muted" style="font-size: 13.5px;">Obras atualmente em andamento</span>
+        </div>
+        <div class="continue-reading-container">
+          ${inProgressItems.length > 0 ? inProgressItems.map(item => {
+            const isBook = item.type === 'book';
+            const curPage = item.currentPage || 0;
+            const totalPages = item.pages > 0 ? item.pages : null;
+            const hasTotal = totalPages !== null;
+            const percent = hasTotal ? Math.min(100, Math.round((curPage / totalPages) * 100)) : null;
+            const pagesLeft = hasTotal ? Math.max(0, totalPages - curPage) : null;
+
+            return `
               <div class="continue-card" onclick="UI.showDetailModal('${item.id}', true)">
                 <div class="continue-thumb-side">
                   <img src="${item.cover}" alt="${this.escapeHtml(item.title)}" onerror="UI.handleCoverError(this, '${item.type}')"/>
                 </div>
                 <div class="continue-info-side">
-                  <span class="continue-tag">${item.type === 'book' ? '📖 Lendo Agora' : '📺 Assistindo Agora'}</span>
+                  <span class="continue-tag">${isBook ? '📖 Lendo Agora' : '📺 Assistindo Agora'}</span>
                   <h4 class="continue-title">${this.escapeHtml(item.title)}</h4>
-                  <p class="continue-creator">${this.escapeHtml(item.creator)} • ${item.genre}</p>
-                  <p style="font-size: 12px; color: var(--accent-orange); font-weight: 700; margin-top: 4px;">
-                    ${item.type === 'book' ? `Páginas estimadas: ${item.pages || 320}` : `Em progresso`}
-                  </p>
-                  <div style="margin-top: 10px;">
-                    <button class="btn btn-secondary btn-xs" onclick="event.stopPropagation(); UI.showEditItemModal('${item.id}')">
+                  <p class="continue-creator">${this.escapeHtml(item.creator)} • ${this.escapeHtml(item.genre)}</p>
+
+                  ${isBook ? `
+                    ${hasTotal ? `
+                      <div class="reading-progress-track">
+                        <div class="reading-progress-fill" style="width: ${percent}%;"></div>
+                      </div>
+                      <div class="reading-progress-meta">
+                        <span>Pág. <strong>${curPage}</strong> de ${totalPages} (${pagesLeft} restantes)</span>
+                        <span class="reading-progress-percentage">${percent}%</span>
+                      </div>
+                    ` : `
+                      <div class="reading-progress-meta" style="margin: 6px 0;">
+                        <span>Página atual: <strong>${curPage}</strong> (total não informado)</span>
+                      </div>
+                    `}
+                  ` : `
+                    <p style="font-size: 12px; color: var(--accent-green); font-weight: 700; margin-top: 4px;">
+                      Em andamento
+                    </p>
+                  `}
+
+                  <div style="display: flex; gap: 8px; margin-top: 10px; flex-wrap: wrap;">
+                    <button class="btn btn-secondary btn-xs" onclick="event.stopPropagation(); ${isBook ? `UI.showProgressModal('${item.id}')` : `UI.showEditItemModal('${item.id}')`}">
                       ✏️ Atualizar Progresso
+                    </button>
+                    <button class="btn btn-outline btn-xs" onclick="event.stopPropagation(); UI.showDetailModal('${item.id}', true)">
+                      Detalhes →
                     </button>
                   </div>
                 </div>
               </div>
-            `).join('')}
-          </div>
-        </section>
-      ` : ''}
+            `;
+          }).join('') : `
+            <div class="continue-empty-state">
+              <p style="color: var(--primary-navy); font-family: var(--font-serif); font-size: 17px; font-weight: 700; margin-bottom: 4px;">Nenhuma leitura em andamento no momento</p>
+              <p style="color: var(--text-muted); font-size: 13.5px; margin-bottom: 14px;">Que tal iniciar uma leitura da sua biblioteca ou descobrir uma nova história?</p>
+              <div style="display: flex; gap: 10px; justify-content: center;">
+                <button class="btn btn-secondary btn-sm" onclick="UI.navigate('books')">Ver Meus Livros</button>
+                <button class="btn btn-primary btn-sm" onclick="UI.navigate('discover')">Descobrir Obras</button>
+              </div>
+            </div>
+          `}
+        </div>
+      </section>
 
       <!-- ================= SEÇÃO: PARA ASSISTIR / LER ================= -->
       ${wishlistItems.length > 0 ? `
@@ -494,10 +555,24 @@ const UI = {
 
           <div class="editorial-card-meta-row">
             <span class="editorial-genre-pill">${this.escapeHtml(item.genre)}</span>
-            <div class="editorial-rating-pill">
-              <span>★</span> ${(parseFloat(item.rating) || 5.0).toFixed(1)}
-            </div>
+            ${(item.type !== 'book' || item.status === 'read') && parseFloat(item.rating) > 0 ? `
+              <div class="editorial-rating-pill">
+                <span>★</span> ${(parseFloat(item.rating) || 5.0).toFixed(1)}
+              </div>
+            ` : ''}
           </div>
+
+          ${item.type === 'book' && item.status === 'reading' ? `
+            <div style="margin-top: 6px;">
+              <div class="reading-progress-track" style="margin: 3px 0 2px 0; height: 5px;">
+                <div class="reading-progress-fill" style="width: ${item.pages > 0 ? Math.min(100, Math.round(((item.currentPage || 0) / item.pages) * 100)) : 0}%;"></div>
+              </div>
+              <div style="font-size: 11px; color: var(--accent-orange); font-weight: 700; display: flex; justify-content: space-between;">
+                <span>📖 ${item.currentPage || 0}${item.pages > 0 ? `/${item.pages} pág` : ' pág'}</span>
+                ${item.pages > 0 ? `<span>${Math.min(100, Math.round(((item.currentPage || 0) / item.pages) * 100))}%</span>` : ''}
+              </div>
+            </div>
+          ` : ''}
 
           <div style="margin-top: 10px; display: flex; gap: 6px;">
             ${isLibraryItem ? `
@@ -583,11 +658,11 @@ const UI = {
         (item.title || '').toLowerCase().includes(this.searchQuery.toLowerCase()) ||
         (item.creator || '').toLowerCase().includes(this.searchQuery.toLowerCase());
       const matchStatus = this.selectedStatusFilter === 'all' || item.status === this.selectedStatusFilter;
-      const matchGenre = this.selectedGenreFilter === 'all' || item.genre === this.selectedGenreFilter;
+      const matchGenre = this.selectedGenreFilter === 'all' || GenreNormalizer.match(item.genre, this.selectedGenreFilter);
       return matchSearch && matchStatus && matchGenre;
     });
 
-    const genres = Array.from(new Set(items.map(i => i.genre).filter(Boolean)));
+    const genres = Array.from(new Set(items.map(i => GenreNormalizer.normalize(i.genre)).filter(Boolean))).sort();
 
     content.innerHTML = `
       <section style="margin-bottom: 24px; display: flex; align-items: center; justify-content: space-between; flex-wrap: wrap; gap: 16px;">
@@ -654,14 +729,28 @@ const UI = {
 
     // Se houver busca externa ativa com resultados
     const hasExternal = this.externalSearchResults.length > 0;
-    const items = hasExternal ? this.externalSearchResults : catalog;
+    const baseItems = hasExternal ? this.externalSearchResults : catalog;
 
-    // Agrupamento por tipo
-    const books = items.filter(i => i.type === 'book');
-    const movies = items.filter(i => i.type === 'movie');
-    const series = items.filter(i => i.type === 'series');
+    // Todos os gêneros normalizados disponíveis no catálogo/resultados
+    const allGenres = Array.from(new Set(baseItems.map(i => GenreNormalizer.normalize(i.genre)).filter(Boolean))).sort();
 
-    const allGenres = Array.from(new Set(catalog.map(i => i.genre).filter(Boolean)));
+    // Aplicar filtro de gênero ativo
+    const filteredByGenre = baseItems.filter(item => {
+      return this.selectedGenreFilter === 'all' || GenreNormalizer.match(item.genre, this.selectedGenreFilter);
+    });
+
+    // Agrupamento por tipo a partir dos itens filtrados pelo gênero
+    const books = filteredByGenre.filter(i => i.type === 'book');
+    const movies = filteredByGenre.filter(i => i.type === 'movie');
+    const series = filteredByGenre.filter(i => i.type === 'series');
+
+    const totalMatching = this.selectedStatusFilter === 'all'
+      ? filteredByGenre.length
+      : this.selectedStatusFilter === 'book'
+      ? books.length
+      : this.selectedStatusFilter === 'movie'
+      ? movies.length
+      : series.length;
 
     content.innerHTML = `
       <section class="discover-hero-banner">
@@ -689,7 +778,7 @@ const UI = {
         <div class="discover-filter-bar">
           <div class="discover-type-pills">
             <button class="type-pill-btn ${this.selectedStatusFilter === 'all' ? 'active' : ''}" onclick="UI.handleDiscoverType('all')">
-              🌟 Todos (${items.length})
+              🌟 Todos (${filteredByGenre.length})
             </button>
             <button class="type-pill-btn ${this.selectedStatusFilter === 'book' ? 'active' : ''}" onclick="UI.handleDiscoverType('book')">
               📚 Livros (${books.length})
@@ -746,13 +835,30 @@ const UI = {
         </section>
       ` : ''}
 
-      ${items.length === 0 ? `
-        <div style="padding: 48px; text-align: center; background: #FFFFFF; border-radius: var(--radius-md); border: 1px solid var(--border-warm); margin-top: 32px;">
+      ${totalMatching === 0 ? `
+        <div style="padding: 48px 24px; text-align: center; background: #FFFFFF; border-radius: var(--radius-md); border: 1px solid var(--border-warm); margin-top: 32px;">
           <h3 style="font-family: var(--font-serif); font-size: 20px; color: var(--primary-navy); margin-bottom: 8px;">Nenhum conteúdo encontrado</h3>
-          <p style="color: var(--text-muted);">Tente pesquisar com outros termos ou adicione a obra manualmente pelo botão no topo.</p>
+          <p style="color: var(--text-muted); margin-bottom: 18px;">
+            ${this.selectedGenreFilter !== 'all' ? `Não há obras com o gênero <strong>"${this.escapeHtml(this.selectedGenreFilter)}"</strong> correspondentes à sua busca.` : 'Tente pesquisar com outros termos ou adicione a obra manualmente pelo botão no topo.'}
+          </p>
+          ${(this.selectedGenreFilter !== 'all' || this.selectedStatusFilter !== 'all' || this.searchQuery) ? `
+            <button class="btn btn-secondary btn-sm" onclick="UI.handleClearDiscoverFilters()">Limpar Todos os Filtros</button>
+          ` : `
+            <button class="btn btn-primary btn-sm" onclick="UI.showAddModal()">Adicionar Manualmente</button>
+          `}
         </div>
       ` : ''}
     `;
+  },
+
+  handleClearDiscoverFilters() {
+    this.selectedGenreFilter = 'all';
+    this.selectedStatusFilter = 'all';
+    this.searchQuery = '';
+    this.externalSearchResults = [];
+    const searchField = document.getElementById('global-search-field');
+    if (searchField) searchField.value = '';
+    this.renderDiscover(Storage.getCurrentUser());
   },
 
   handleGlobalSearchInput(val) {
@@ -815,13 +921,13 @@ const UI = {
       return;
     }
     const content = document.getElementById('main-content');
-    const items = Storage.getUserItems(user.id).filter(i => i.isFavorite || i.rating === 5);
+    const items = Storage.getUserItems(user.id).filter(i => i.isFavorite === true);
 
     content.innerHTML = `
       <section style="margin-bottom: 28px;">
         <span class="hero-editorial-tag">Galeria Afetiva</span>
         <h1 class="hero-main-title" style="font-size: 34px;">❤️ Meus Favoritos</h1>
-        <p class="text-muted">As obras que marcaram sua trajetória com nota máxima e coração preenchido.</p>
+        <p class="text-muted">As obras que você favoritou com carinho no seu diário cultural.</p>
       </section>
 
       <div class="editorial-cards-grid">
@@ -959,6 +1065,9 @@ const UI = {
         </div>
       </section>
 
+      <!-- Preferências Culturais (Onboarding) -->
+      ${typeof Onboarding !== 'undefined' ? Onboarding.renderProfileSection(user.id) : ''}
+
       <!-- Histórico de Atividades Recentes -->
       <section class="editorial-section">
         <div class="section-editorial-header">
@@ -1038,9 +1147,33 @@ const UI = {
                   <div class="metric-pill">📺 <strong>${item.seasons || 1}</strong> temporadas</div>
                   <div class="metric-pill">🎞️ <strong>${item.episodes || 10}</strong> episódios</div>
                 `}
-                <div class="metric-pill">⭐ <strong>${(parseFloat(item.rating) || 5.0).toFixed(1)}</strong> / 5.0</div>
+                ${(item.type !== 'book' || item.status === 'read') && parseFloat(item.rating) > 0 ? `
+                  <div class="metric-pill">⭐ <strong>${(parseFloat(item.rating) || 5.0).toFixed(1)}</strong> / 5.0</div>
+                ` : ''}
                 <div class="metric-pill" style="color: var(--accent-green);">Status: <strong>${Storage.formatStatus(item.type, item.status || 'read')}</strong></div>
               </div>
+
+              ${item.type === 'book' && item.status === 'reading' ? `
+                <div style="margin: 16px 0; padding: 14px 18px; background: #FAF6EE; border-radius: var(--radius-md); border: 1px solid var(--border-warm);">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                    <span style="font-size: 13px; font-weight: 700; color: var(--primary-navy);">Progresso de Leitura</span>
+                    <button class="btn btn-secondary btn-xs" onclick="UI.showProgressModal('${item.id}')">✏️ Atualizar Página</button>
+                  </div>
+                  ${item.pages > 0 ? `
+                    <div class="reading-progress-track">
+                      <div class="reading-progress-fill" style="width: ${Math.min(100, Math.round(((item.currentPage || 0) / item.pages) * 100))}%;"></div>
+                    </div>
+                    <div class="reading-progress-meta">
+                      <span>Página <strong>${item.currentPage || 0}</strong> de <strong>${item.pages}</strong> (${Math.max(0, item.pages - (item.currentPage || 0))} restantes)</span>
+                      <span class="reading-progress-percentage">${Math.min(100, Math.round(((item.currentPage || 0) / item.pages) * 100))}%</span>
+                    </div>
+                  ` : `
+                    <div class="reading-progress-meta">
+                      <span>Página atual: <strong>${item.currentPage || 0}</strong> (total não informado)</span>
+                    </div>
+                  `}
+                </div>
+              ` : ''}
 
               <div class="detail-synopsis-box">
                 <h4>Sinopse da Obra</h4>
@@ -1058,6 +1191,11 @@ const UI = {
               <!-- Ações Principais -->
               <div style="display: flex; gap: 12px; margin-top: 24px; flex-wrap: wrap;">
                 ${user ? `
+                  ${isLibraryItem && item.type === 'book' && item.status === 'reading' ? `
+                    <button class="btn btn-secondary" onclick="UI.showProgressModal('${item.id}')">
+                      📖 Atualizar Progresso
+                    </button>
+                  ` : ''}
                   <button class="btn btn-primary" onclick="UI.showQuickAddModal('${item.id}')">
                     ${isLibraryItem ? '✏️ Alterar Status / Avaliação' : '＋ Adicionar à Minha Biblioteca'}
                   </button>
@@ -1169,14 +1307,14 @@ const UI = {
 
               <!-- Seção de Avaliação e Resenha Ampla (0/1000 caracteres) -->
               <div class="form-review-section">
-                <div class="form-group">
+                <div id="add-modal-rating-section" class="form-group">
                   <label>Sua Avaliação (1 a 5 estrelas)</label>
                   <div style="display: flex; gap: 6px;" id="new-item-rating-stars">
                     ${[1, 2, 3, 4, 5].map(s => `
-                      <span class="interactive-star filled" data-val="${s}" onclick="UI.setFormRating(${s})">★</span>
+                      <span class="interactive-star" data-val="${s}" onclick="UI.setFormRating(${s})">★</span>
                     `).join('')}
                   </div>
-                  <input type="hidden" name="rating" id="new-item-rating-val" value="5"/>
+                  <input type="hidden" name="rating" id="new-item-rating-val" value=""/>
                 </div>
 
                 <div class="form-group">
@@ -1196,7 +1334,7 @@ const UI = {
                 </div>
 
                 <div style="display: flex; align-items: center; gap: 8px; margin: 12px 0;">
-                  <input type="checkbox" id="add-item-fav-check" name="isFavorite" value="true" checked style="accent-color: var(--accent-orange); width: 18px; height: 18px;"/>
+                  <input type="checkbox" id="add-item-fav-check" name="isFavorite" value="true" style="accent-color: var(--accent-orange); width: 18px; height: 18px;"/>
                   <label for="add-item-fav-check" style="font-weight: 600; color: var(--primary-navy); cursor: pointer;">❤️ Salvar nos Favoritos</label>
                 </div>
               </div>
@@ -1213,7 +1351,8 @@ const UI = {
     `;
 
     modal.classList.add('open');
-    this.setFormRating(5);
+    // Trigger visibility based on preselected type
+    UI.handleAddModalTypeStatusChange(preselectedType);
   },
 
   switchAddModalType(type) {
@@ -1233,6 +1372,8 @@ const UI = {
     if (resultsContainer) resultsContainer.innerHTML = '';
     const feedbackContainer = document.getElementById('autofill-feedback-container');
     if (feedbackContainer) feedbackContainer.innerHTML = '';
+    // Update rating visibility for the new media type
+    this.handleAddModalTypeStatusChange(type);
   },
 
   // Busca rápida com debounce no cadastro de conteúdo
@@ -1363,8 +1504,27 @@ const UI = {
           <input type="text" name="creator" required class="form-input" placeholder="Ex: J.R.R. Tolkien" value="${item ? this.escapeHtml(item.creator) : ''}"/>
         </div>
         <div class="form-group">
-          <label>Número de Páginas *</label>
-          <input type="number" name="pages" min="1" required class="form-input" placeholder="Ex: 320" value="${item ? item.pages : '320'}"/>
+          <label>Total de Páginas</label>
+          <input type="number" name="pages" id="book-form-pages" min="1" step="1" class="form-input" placeholder="Ex: 320 (ou deixe em branco se não souber)" value="${item && item.pages ? item.pages : ''}" oninput="UI.updateLiveReadingCalc()"/>
+        </div>
+        <div class="form-group">
+          <label>Página Atual</label>
+          <input type="number" name="currentPage" id="book-form-current-page" min="0" step="1" class="form-input" placeholder="Ex: 45" value="${item && item.currentPage !== undefined ? item.currentPage : 0}" oninput="UI.updateLiveReadingCalc()"/>
+        </div>
+        <div id="book-reading-calc-preview" style="grid-column: 1 / -1; font-size: 12.5px; font-weight: 600; color: var(--accent-orange); background: #FAF6EE; padding: 8px 12px; border-radius: var(--radius-sm); border-left: 3px solid var(--accent-orange);">
+          ${(() => {
+            const cur = item ? (item.currentPage || 0) : 0;
+            const tot = item ? (item.pages || 0) : 0;
+            if (tot > 0) {
+              const pct = Math.min(100, Math.round((cur / tot) * 100));
+              const left = Math.max(0, tot - cur);
+              return `Progresso: ${cur} de ${tot} páginas (${pct}%) • Faltam ${left} páginas`;
+            } else if (cur > 0) {
+              return `Página atual: ${cur} (total de páginas desconhecido)`;
+            } else {
+              return `Informe as páginas para acompanhar seu ritmo de leitura em tempo real.`;
+            }
+          })()}
         </div>
         <div class="form-group">
           <label>Gênero Literário *</label>
@@ -1495,15 +1655,17 @@ const UI = {
               </div>
 
               <div class="form-review-section">
-                <div class="form-group">
-                  <label>Sua Avaliação (1 a 5 estrelas)</label>
-                  <div style="display: flex; gap: 6px;" id="new-item-rating-stars">
-                    ${[1, 2, 3, 4, 5].map(s => `
-                      <span class="interactive-star ${s <= item.rating ? 'filled' : ''}" data-val="${s}" onclick="UI.setFormRating(${s})">★</span>
-                    `).join('')}
+                ${item.type !== 'book' || item.status === 'read' ? `
+                  <div class="form-group">
+                    <label>Sua Avaliação (1 a 5 estrelas)</label>
+                    <div style="display: flex; gap: 6px;" id="new-item-rating-stars">
+                      ${[1, 2, 3, 4, 5].map(s => `
+                        <span class="interactive-star ${s <= item.rating ? 'filled' : ''}" data-val="${s}" onclick="UI.setFormRating(${s})">★</span>
+                      `).join('')}
+                    </div>
+                    <input type="hidden" name="rating" id="new-item-rating-val" value="${item.rating || ''}"/>
                   </div>
-                  <input type="hidden" name="rating" id="new-item-rating-val" value="${item.rating || 5}"/>
-                </div>
+                ` : `<input type="hidden" name="rating" id="new-item-rating-val" value=""/>`}
 
                 <div class="form-group">
                   <label>O que você achou? (Comentário ou Resenha)</label>
@@ -1537,7 +1699,9 @@ const UI = {
     `;
 
     modal.classList.add('open');
-    this.setFormRating(item.rating || 5);
+    if (item.type !== 'book' || item.status === 'read') {
+      this.setFormRating(item.rating || 0);
+    }
   },
 
   showQuickAddModal(catalogOrItemId) {
@@ -1575,31 +1739,31 @@ const UI = {
               <div style="padding: 20px 24px;">
                 <div class="form-group">
                   <label>Status de Consumo</label>
-                  <select name="status" class="form-input">
+                  <select name="status" class="form-input" onchange="UI.handleQuickAddStatusChange(this, '${item.type}')">
                     ${item.type === 'book' ? `
-                      <option value="read" selected>Lido</option>
-                      <option value="reading">Lendo Agora</option>
-                      <option value="want_to_read">Quero ler</option>
+                      <option value="read" ${item.status === 'read' ? 'selected' : (item.status ? '' : 'selected')}>Lido</option>
+                      <option value="reading" ${item.status === 'reading' ? 'selected' : ''}>Lendo Agora</option>
+                      <option value="want_to_read" ${item.status === 'want_to_read' ? 'selected' : ''}>Quero ler</option>
                     ` : item.type === 'movie' ? `
-                      <option value="watched" selected>Assistido</option>
-                      <option value="want_to_watch">Quero assistir</option>
+                      <option value="watched" ${item.status === 'watched' ? 'selected' : (item.status ? '' : 'selected')}>Assistido</option>
+                      <option value="want_to_watch" ${item.status === 'want_to_watch' ? 'selected' : ''}>Quero assistir</option>
                     ` : `
-                      <option value="completed" selected>Finalizada</option>
-                      <option value="watching">Assistindo Agora</option>
-                      <option value="want_to_watch">Quero assistir</option>
-                      <option value="paused">Pausada</option>
+                      <option value="completed" ${item.status === 'completed' ? 'selected' : (item.status ? '' : 'selected')}>Finalizada</option>
+                      <option value="watching" ${item.status === 'watching' ? 'selected' : ''}>Assistindo Agora</option>
+                      <option value="want_to_watch" ${item.status === 'want_to_watch' ? 'selected' : ''}>Quero assistir</option>
+                      <option value="paused" ${item.status === 'paused' ? 'selected' : ''}>Pausada</option>
                     `}
                   </select>
                 </div>
 
-                <div class="form-group">
+                <div id="quick-add-rating-section" class="form-group">
                   <label>Sua Avaliação</label>
                   <div style="display: flex; gap: 6px;" id="new-item-rating-stars">
                     ${[1, 2, 3, 4, 5].map(s => `
-                      <span class="interactive-star filled" data-val="${s}" onclick="UI.setFormRating(${s})">★</span>
+                      <span class="interactive-star ${s <= (item.rating || 0) ? 'filled' : ''}" data-val="${s}" onclick="UI.setFormRating(${s})">★</span>
                     `).join('')}
                   </div>
-                  <input type="hidden" name="rating" id="new-item-rating-val" value="5"/>
+                  <input type="hidden" name="rating" id="new-item-rating-val" value="${item.rating || ''}"/>
                 </div>
 
                 <div class="form-group">
@@ -1610,10 +1774,10 @@ const UI = {
                     maxlength="1000"
                     placeholder="Sua opinião sincera..."
                     oninput="UI.updateCharCounter(this, 'quick-add-counter', 1000)"
-                  ></textarea>
+                  >${this.escapeHtml(item.review || '')}</textarea>
                   <div class="review-counter-row">
                     <span>Grave suas reflexões culturais.</span>
-                    <span id="quick-add-counter" class="review-counter-badge">0/1000</span>
+                    <span id="quick-add-counter" class="review-counter-badge">${(item.review || '').length}/1000</span>
                   </div>
                 </div>
               </div>
@@ -1629,7 +1793,11 @@ const UI = {
     `;
 
     modal.classList.add('open');
-    this.setFormRating(5);
+    // Show/hide rating based on current status selection for books
+    UI.handleQuickAddStatusChange(document.querySelector('#form-quick-add select[name="status"]'), item.type);
+    if (item.type !== 'book' || item.status === 'read') {
+      this.setFormRating(item.rating || 0);
+    }
   },
 
   handleSaveNewItem(e) {
@@ -1649,13 +1817,16 @@ const UI = {
       cover: formData.get('cover'),
       year: formData.get('year'),
       pages: formData.get('pages'),
+      currentPage: mediaType === 'book' ? Math.max(0, parseInt(formData.get('currentPage'), 10) || 0) : 0,
       duration: formData.get('duration'),
       seasons: formData.get('seasons'),
       episodes: formData.get('episodes'),
       isbn: formData.get('isbn'),
       publisher: formData.get('publisher'),
       status: formData.get('status'),
-      rating: parseFloat(formData.get('rating')) || 5,
+      rating: formData.get('status') === 'read' || mediaType !== 'book'
+        ? (parseFloat(formData.get('rating')) || 0)
+        : 0, // books not 'read': no rating assigned on save
       review: formData.get('review') || '',
       isFavorite: formData.get('isFavorite') === 'true'
     };
@@ -1690,16 +1861,39 @@ const UI = {
       episodes: formData.get('episodes'),
       isbn: formData.get('isbn'),
       publisher: formData.get('publisher'),
+      // For books: only set rating if status is 'read'; otherwise preserve old value
       status: formData.get('status'),
-      rating: parseFloat(formData.get('rating')) || 5,
       review: formData.get('review') || '',
       isFavorite: formData.get('isFavorite') === 'true'
     };
 
+    if (type === 'book') {
+      updates.currentPage = Math.max(0, parseInt(formData.get('currentPage'), 10) || 0);
+      const newStatus = formData.get('status');
+      const rawRating = parseFloat(formData.get('rating'));
+      if (newStatus === 'read') {
+        // Only update rating when marking as read
+        updates.rating = rawRating > 0 ? rawRating : undefined; // undefined = keep existing
+      }
+      // else: do NOT add rating to updates — updateItem will spread oldItem.rating
+    } else {
+      updates.rating = parseFloat(formData.get('rating')) || 5;
+    }
+
     try {
-      Storage.updateItem(user.id, itemId, updates);
+      const updated = Storage.updateItem(user.id, itemId, updates);
       this.closeModal();
-      this.showToast('Obra atualizada com sucesso!', 'success');
+
+      if (type === 'book' && updates.status === 'reading' && updated.pages > 0 && updated.currentPage >= updated.pages) {
+        if (confirm(`Parabéns! Você alcançou a última página de "${updated.title}" (${updated.currentPage}/${updated.pages} pág). Deseja marcar este livro como "Lido"?`)) {
+          Storage.markAsRead(user.id, itemId);
+          this.showToast(`"${updated.title}" marcado como Lido! 🏆`, 'success');
+        } else {
+          this.showToast('Progresso atualizado com sucesso!', 'success');
+        }
+      } else {
+        this.showToast('Obra atualizada com sucesso!', 'success');
+      }
       this.navigate(this.currentView);
     } catch (err) {
       this.showToast(err.message, 'error');
@@ -1720,14 +1914,38 @@ const UI = {
     const form = e.target;
     const formData = new FormData(form);
 
+    // Evitar duplicatas se já existe na biblioteca do usuário ativo
+    const existing = Storage.getUserItems(user.id).find(i => i.id === catalogOrItemId || (catItem.id && i.catalogId === catItem.id));
+    if (existing) {
+      const newStatus = formData.get('status');
+      const existingUpdates = {
+        status: newStatus,
+        review: formData.get('review') || existing.review || ''
+      };
+      // Only update rating if the item is (or becomes) 'read' (for books)
+      if (catItem.type !== 'book' || newStatus === 'read') {
+        const r = parseFloat(formData.get('rating'));
+        if (r > 0) existingUpdates.rating = r;
+      }
+      Storage.updateItem(user.id, existing.id, existingUpdates);
+      this.closeModal();
+      this.showToast(`"${catItem.title}" atualizado na sua biblioteca! ✨`, 'success');
+      this.navigate(this.currentView);
+      return;
+    }
+
+    const newStatus2 = formData.get('status');
+    const newRating = catItem.type !== 'book' || newStatus2 === 'read'
+      ? (parseFloat(formData.get('rating')) || 0)
+      : 0;
     const newItem = {
       ...catItem,
       id: null,
       catalogId: catItem.id,
-      status: formData.get('status'),
-      rating: parseFloat(formData.get('rating')) || 5,
+      status: newStatus2,
+      rating: newRating,
       review: formData.get('review') || '',
-      isFavorite: true
+      isFavorite: false // Não favoritar automaticamente ao adicionar à biblioteca
     };
 
     Storage.addItem(user.id, newItem);
@@ -1742,9 +1960,289 @@ const UI = {
       this.showAuthModal('login');
       return;
     }
-    const isFav = Storage.toggleFavorite(user.id, itemId);
+
+    const userItems = Storage.getUserItems(user.id);
+    const itemInLib = userItems.find(i => i.id === itemId);
+    let isFav = false;
+
+    if (itemInLib) {
+      isFav = Storage.toggleFavorite(user.id, itemId);
+    } else {
+      const catItem = (Storage.getCatalog() || []).find(c => c.id === itemId) ||
+                      (this.externalSearchResults || []).find(c => c.id === itemId);
+      if (catItem) {
+        Storage.addItem(user.id, {
+          ...catItem,
+          id: null,
+          catalogId: catItem.id,
+          isFavorite: true,
+          status: catItem.type === 'book' ? 'want_to_read' : 'want_to_watch'
+        });
+        isFav = true;
+      }
+    }
+
     this.showToast(isFav ? 'Adicionado aos favoritos ❤️' : 'Removido dos favoritos', 'info');
+
+    // Se o modal de detalhes estiver aberto, atualiza para refletir o estado
+    const detailModalCard = document.querySelector('.modal-detail-layout');
+    if (detailModalCard) {
+      this.showDetailModal(itemId, true);
+    }
     this.navigate(this.currentView);
+  },
+
+  // ------------------ MODAL DE ACOMPANHAMENTO DE LEITURA (PÁGINAS) ------------------
+  showProgressModal(itemId) {
+    const user = Storage.getCurrentUser();
+    if (!user) {
+      this.showAuthModal('login');
+      return;
+    }
+    const item = Storage.getUserItems(user.id).find(i => i.id === itemId);
+    if (!item || item.type !== 'book') return;
+
+    const modal = document.getElementById('modal-container');
+    const curPage = item.currentPage || 0;
+    const totalPages = item.pages || 0;
+    const percent = totalPages > 0 ? Math.min(100, Math.round((curPage / totalPages) * 100)) : 0;
+    const pagesLeft = totalPages > 0 ? Math.max(0, totalPages - curPage) : null;
+
+    modal.innerHTML = `
+      <div class="modal-backdrop" onclick="UI.closeModal()">
+        <div class="modal-card modal-md modal-fixed-layout" onclick="event.stopPropagation()">
+          <div class="modal-header modal-header-fixed">
+            <h2 class="modal-title">📖 Acompanhamento de Leitura</h2>
+            <button class="modal-close-btn" onclick="UI.closeModal()" title="Fechar">✕</button>
+          </div>
+
+          <div class="modal-body-scroll">
+            <form id="form-progress-update" onsubmit="UI.handleSaveReadingProgress(event, '${item.id}')">
+              <div style="display: flex; gap: 16px; padding: 18px 24px; background: #FAF6EE; border-bottom: 1px solid var(--border-warm);">
+                <img src="${item.cover}" alt="${this.escapeHtml(item.title)}" style="width: 54px; height: 78px; object-fit: cover; border-radius: 4px; box-shadow: var(--shadow-book);" onerror="UI.handleCoverError(this, 'book')"/>
+                <div>
+                  <h4 style="font-family: var(--font-serif); font-size: 17px; color: var(--primary-navy);">${this.escapeHtml(item.title)}</h4>
+                  <p style="font-size: 13px; color: var(--text-muted);">${this.escapeHtml(item.creator)}</p>
+                  <span class="genre-tag-active" style="display: inline-block; margin-top: 6px; font-size: 11px;">📖 Lendo Agora</span>
+                </div>
+              </div>
+
+              <div style="padding: 24px;">
+                <div style="margin-bottom: 20px;">
+                  <div class="reading-progress-track" style="height: 10px;">
+                    <div id="modal-progress-bar-fill" class="reading-progress-fill" style="width: ${percent}%;"></div>
+                  </div>
+                  <div class="reading-progress-meta" style="font-size: 13px;">
+                    <span id="modal-progress-label">
+                      ${totalPages > 0 ? `Pág. <strong>${curPage}</strong> de ${totalPages} (${pagesLeft} restantes)` : `Página <strong>${curPage}</strong> lida`}
+                    </span>
+                    <span id="modal-progress-percent" class="reading-progress-percentage">${totalPages > 0 ? `${percent}%` : ''}</span>
+                  </div>
+                </div>
+
+                <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 14px;">
+                  <div class="form-group">
+                    <label style="font-weight: 700; color: var(--primary-navy);">Página Atual *</label>
+                    <input
+                      type="number"
+                      name="currentPage"
+                      id="progress-modal-cur-page"
+                      class="form-input"
+                      min="0"
+                      step="1"
+                      ${totalPages > 0 ? `max="${totalPages}"` : ''}
+                      value="${curPage}"
+                      required
+                      oninput="UI.handleLiveProgressInput(this.value)"
+                    />
+                  </div>
+                  <div class="form-group">
+                    <label style="font-weight: 700; color: var(--primary-navy);">Total de Páginas</label>
+                    <input
+                      type="number"
+                      name="totalPages"
+                      id="progress-modal-total-pages"
+                      class="form-input"
+                      min="1"
+                      step="1"
+                      value="${totalPages > 0 ? totalPages : ''}"
+                      placeholder="Total desconhecido"
+                      oninput="UI.handleLiveTotalPagesInput(this.value)"
+                    />
+                  </div>
+                </div>
+
+                <!-- Botões Rápidos de Avanço -->
+                <div style="margin-top: 14px;">
+                  <label style="display: block; font-size: 12px; color: var(--text-muted); font-weight: 600; margin-bottom: 6px;">Avanço Rápido:</label>
+                  <div style="display: flex; gap: 8px; flex-wrap: wrap;">
+                    <button type="button" class="btn btn-secondary btn-xs" onclick="UI.quickAdvancePages(5)">+5 pág</button>
+                    <button type="button" class="btn btn-secondary btn-xs" onclick="UI.quickAdvancePages(10)">+10 pág</button>
+                    <button type="button" class="btn btn-secondary btn-xs" onclick="UI.quickAdvancePages(25)">+25 pág</button>
+                    ${totalPages > 0 ? `
+                      <button type="button" class="btn btn-outline btn-xs" onclick="UI.quickAdvancePagesToTotal(${totalPages})">Cheguei ao Fim (${totalPages})</button>
+                    ` : ''}
+                  </div>
+                </div>
+
+                <!-- Oferta de Finalização se Chegou ao Total -->
+                <div id="progress-completion-offer" style="display: ${curPage >= totalPages && totalPages > 0 ? 'block' : 'none'}; margin-top: 20px; background: #EBF5F1; border: 1px solid var(--accent-green); border-radius: var(--radius-sm); padding: 14px 16px;">
+                  <p style="font-weight: 700; color: var(--accent-green); margin-bottom: 4px;">🎉 Parabéns! Você chegou à última página!</p>
+                  <p style="font-size: 13px; color: var(--text-body); margin-bottom: 10px;">Deseja concluir a leitura e marcar o livro como "Lido"?</p>
+                  <div style="display: flex; gap: 10px;">
+                    <button type="button" class="btn btn-primary btn-sm" onclick="UI.confirmMarkAsReadFromModal('${item.id}')">
+                      🏆 Sim, Marcar como Lido
+                    </button>
+                    <button type="button" class="btn btn-outline btn-sm" onclick="document.getElementById('progress-completion-offer').style.display='none'">
+                      Continuar como "Lendo"
+                    </button>
+                  </div>
+                </div>
+              </div>
+
+              <div class="modal-footer-fixed">
+                <button type="button" class="btn btn-outline" onclick="UI.closeModal()">Cancelar</button>
+                <button type="submit" class="btn btn-primary">Salvar Progresso</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+    `;
+
+    modal.classList.add('open');
+  },
+
+  handleLiveProgressInput(val) {
+    const curPage = Math.max(0, parseInt(val, 10) || 0);
+    const totalInput = document.getElementById('progress-modal-total-pages');
+    const totalPages = totalInput ? Math.max(0, parseInt(totalInput.value, 10) || 0) : 0;
+
+    const barFill = document.getElementById('modal-progress-bar-fill');
+    const label = document.getElementById('modal-progress-label');
+    const percentEl = document.getElementById('modal-progress-percent');
+    const completionOffer = document.getElementById('progress-completion-offer');
+
+    if (totalPages > 0) {
+      const validCur = Math.min(curPage, totalPages);
+      const pct = Math.min(100, Math.round((validCur / totalPages) * 100));
+      const left = Math.max(0, totalPages - validCur);
+      if (barFill) barFill.style.width = `${pct}%`;
+      if (label) label.innerHTML = `Pág. <strong>${validCur}</strong> de ${totalPages} (${left} restantes)`;
+      if (percentEl) percentEl.textContent = `${pct}%`;
+      if (completionOffer) {
+        completionOffer.style.display = validCur >= totalPages ? 'block' : 'none';
+      }
+    } else {
+      if (barFill) barFill.style.width = '0%';
+      if (label) label.innerHTML = `Página <strong>${curPage}</strong> lida (total não informado)`;
+      if (percentEl) percentEl.textContent = '';
+      if (completionOffer) completionOffer.style.display = 'none';
+    }
+  },
+
+  handleLiveTotalPagesInput(val) {
+    const curInput = document.getElementById('progress-modal-cur-page');
+    if (curInput) {
+      const totalPages = Math.max(0, parseInt(val, 10) || 0);
+      if (totalPages > 0) {
+        curInput.setAttribute('max', totalPages);
+      } else {
+        curInput.removeAttribute('max');
+      }
+      this.handleLiveProgressInput(curInput.value);
+    }
+  },
+
+  quickAdvancePages(n) {
+    const curInput = document.getElementById('progress-modal-cur-page');
+    const totalInput = document.getElementById('progress-modal-total-pages');
+    if (!curInput) return;
+    const cur = parseInt(curInput.value, 10) || 0;
+    const total = totalInput ? parseInt(totalInput.value, 10) || 0 : 0;
+    let next = cur + n;
+    if (total > 0 && next > total) next = total;
+    curInput.value = next;
+    this.handleLiveProgressInput(next);
+  },
+
+  quickAdvancePagesToTotal(total) {
+    const curInput = document.getElementById('progress-modal-cur-page');
+    if (!curInput) return;
+    curInput.value = total;
+    this.handleLiveProgressInput(total);
+  },
+
+  confirmMarkAsReadFromModal(itemId) {
+    const user = Storage.getCurrentUser();
+    if (!user) return;
+    Storage.markAsRead(user.id, itemId);
+    this.closeModal();
+    this.showToast('Parabéns! Livro marcado como Lido com sucesso! 🏆', 'success');
+    this.navigate(this.currentView);
+  },
+
+  handleSaveReadingProgress(e, itemId) {
+    e.preventDefault();
+    const user = Storage.getCurrentUser();
+    if (!user) return;
+
+    const form = e.target;
+    const formData = new FormData(form);
+    const newPage = Math.max(0, parseInt(formData.get('currentPage'), 10) || 0);
+    const newTotal = formData.get('totalPages') ? parseInt(formData.get('totalPages'), 10) : null;
+
+    try {
+      const updated = Storage.updateReadingProgress(user.id, itemId, newPage, newTotal);
+      this.closeModal();
+
+      if (updated && updated.pages > 0 && updated.currentPage >= updated.pages) {
+        if (confirm(`Você alcançou a última página de "${updated.title}" (${updated.currentPage}/${updated.pages} pág). Deseja marcar este livro como "Lido"?`)) {
+          Storage.markAsRead(user.id, itemId);
+          this.showToast(`"${updated.title}" concluído com sucesso! 🏆`, 'success');
+        } else {
+          this.showToast(`Progresso salvo: pág. ${updated.currentPage} de ${updated.pages}!`, 'success');
+        }
+      } else {
+        this.showToast(`Progresso de leitura atualizado! 📖`, 'success');
+      }
+
+      this.navigate(this.currentView);
+    } catch (err) {
+      this.showToast(err.message, 'error');
+    }
+  },
+
+  updateLiveReadingCalc() {
+    const curInput = document.getElementById('book-form-current-page');
+    const totInput = document.getElementById('book-form-pages');
+    const preview = document.getElementById('book-reading-calc-preview');
+    if (!preview) return;
+
+    const cur = curInput ? Math.max(0, parseInt(curInput.value, 10) || 0) : 0;
+    const tot = totInput ? Math.max(0, parseInt(totInput.value, 10) || 0) : 0;
+
+    if (tot > 0) {
+      if (cur > tot) {
+        preview.style.color = 'var(--accent-rose)';
+        preview.style.borderLeftColor = 'var(--accent-rose)';
+        preview.textContent = `Atenção: A página atual (${cur}) não pode ser maior que o total de páginas (${tot}).`;
+      } else {
+        const pct = Math.min(100, Math.round((cur / tot) * 100));
+        const left = Math.max(0, tot - cur);
+        preview.style.color = 'var(--accent-orange)';
+        preview.style.borderLeftColor = 'var(--accent-orange)';
+        preview.textContent = `Progresso: ${cur} de ${tot} páginas (${pct}%) • Faltam ${left} páginas`;
+      }
+    } else if (cur > 0) {
+      preview.style.color = 'var(--accent-orange)';
+      preview.style.borderLeftColor = 'var(--accent-orange)';
+      preview.textContent = `Página atual: ${cur} (total de páginas desconhecido)`;
+    } else {
+      preview.style.color = 'var(--text-muted)';
+      preview.style.borderLeftColor = 'var(--border-warm)';
+      preview.textContent = `Informe o total de páginas e a página atual para acompanhar seu ritmo de leitura em tempo real.`;
+    }
   },
 
   handleDeleteItem(itemId) {
@@ -1765,6 +2263,10 @@ const UI = {
       const user = Storage.loginUser(form.email.value, form.password.value);
       this.renderHeader();
       this.showToast(`Bem-vindo de volta, ${user.name}! 👋`, 'success');
+      // Resume onboarding if not completed (deferred or in_progress)
+      if (typeof Onboarding !== 'undefined' && Onboarding.checkAndLaunch(user.id)) {
+        return; // Onboarding will handle navigation
+      }
       this.navigate('dashboard');
     } catch (err) {
       this.showToast(err.message, 'error');
@@ -1784,6 +2286,11 @@ const UI = {
       const user = Storage.registerUser(form.name.value, form.email.value, password);
       this.renderHeader();
       this.showToast(`Bem-vindo ao +Cultura, ${user.name}! 🎉`, 'success');
+      // Always launch onboarding for new real accounts
+      if (typeof Onboarding !== 'undefined') {
+        Onboarding._launchForUser(user.id);
+        return; // Onboarding will handle navigation
+      }
       this.navigate('dashboard');
     } catch (err) {
       this.showToast(err.message, 'error');
@@ -2033,6 +2540,66 @@ const UI = {
       const starVal = parseInt(star.dataset.val, 10);
       star.classList.toggle('filled', starVal <= val);
     });
+  },
+
+  // Toggle rating section visibility in "Adicionar novo" modal based on type + status
+  handleAddModalTypeStatusChange(type) {
+    const ratingSection = document.getElementById('add-modal-rating-section');
+    if (!ratingSection) return;
+    if (type !== 'book') {
+      // Non-book: always show rating
+      ratingSection.style.display = '';
+      this.setFormRating(3);
+      return;
+    }
+    // Book: show rating only when status select is 'read'
+    const statusSel = document.querySelector('#form-add-item select[name="status"]');
+    const currentStatus = statusSel ? statusSel.value : 'want_to_read';
+    const show = currentStatus === 'read';
+    ratingSection.style.display = show ? '' : 'none';
+    const hidden = document.getElementById('new-item-rating-val');
+    if (hidden) hidden.value = '';
+    if (show) this.setFormRating(0);
+    // Attach listener to status select if not already
+    if (statusSel && !statusSel.dataset.ratingListenerAttached) {
+      statusSel.dataset.ratingListenerAttached = '1';
+      statusSel.addEventListener('change', () => {
+        const sec = document.getElementById('add-modal-rating-section');
+        if (!sec) return;
+        const isRead = statusSel.value === 'read';
+        sec.style.display = isRead ? '' : 'none';
+        if (!isRead) {
+          const h = document.getElementById('new-item-rating-val');
+          if (h) h.value = '';
+          document.querySelectorAll('#new-item-rating-stars .interactive-star').forEach(s => s.classList.remove('filled'));
+        } else {
+          this.setFormRating(0);
+        }
+      });
+    }
+  },
+
+  // Toggle rating section visibility in quick-add modal based on status selection
+  handleQuickAddStatusChange(selectEl, mediaType) {
+    const ratingSection = document.getElementById('quick-add-rating-section');
+    if (!ratingSection) return;
+    if (mediaType !== 'book') {
+      ratingSection.style.display = '';
+      return;
+    }
+    const currentStatus = selectEl ? selectEl.value : 'want_to_read';
+    const show = currentStatus === 'read';
+    ratingSection.style.display = show ? '' : 'none';
+    if (!show) {
+      const hidden = document.getElementById('new-item-rating-val');
+      if (hidden) hidden.value = '';
+      document.querySelectorAll('#new-item-rating-stars .interactive-star').forEach(s => s.classList.remove('filled'));
+    }
+    // Attach change listener to the status select if not already
+    if (selectEl && !selectEl.dataset.ratingListenerAttached) {
+      selectEl.dataset.ratingListenerAttached = '1';
+      selectEl.addEventListener('change', () => UI.handleQuickAddStatusChange(selectEl, mediaType));
+    }
   },
 
   closeModal() {

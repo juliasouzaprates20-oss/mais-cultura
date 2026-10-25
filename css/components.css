@@ -583,6 +583,48 @@
   color: var(--text-muted);
 }
 
+/* Barra de Progresso Editorial e Acompanhamento de Leitura */
+.reading-progress-track {
+  width: 100%;
+  height: 7px;
+  background-color: #EFE7D8;
+  border-radius: var(--radius-pill);
+  overflow: hidden;
+  margin: 6px 0;
+  position: relative;
+}
+
+.reading-progress-fill {
+  height: 100%;
+  background: linear-gradient(90deg, var(--accent-orange), #FF9F43);
+  border-radius: var(--radius-pill);
+  transition: width 0.35s ease;
+}
+
+.reading-progress-meta {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 11.5px;
+  color: var(--text-muted);
+  font-weight: 600;
+  margin-top: 2px;
+}
+
+.reading-progress-percentage {
+  color: var(--accent-orange);
+  font-weight: 800;
+}
+
+.continue-empty-state {
+  grid-column: 1 / -1;
+  padding: 36px 28px;
+  text-align: center;
+  background: #FFFFFF;
+  border: 1px dashed var(--border-warm);
+  border-radius: var(--radius-md);
+}
+
 /* Abas Coloridas da Biblioteca (Estilo Referência) */
 .library-color-tabs {
   display: flex;
